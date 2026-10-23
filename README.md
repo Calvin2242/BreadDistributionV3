@@ -100,6 +100,7 @@ Total money = Balance brought forward + Total sales − Salary paid − Spending
 - **Daily report** (Report tab): title, date, balance brought forward, total money received, total money now, spending, salary paid, current balance, attendance (present and absent names), a per-student table of made, sold and money, cash and QR received, and the teacher's remarks. Use **Print** to print it.
 - **Monthly report**: pick a month and press **Show report** for a day-by-day table with totals, remarks, and a per-student summary.
 - **Yearly report**: pick a year for a month-by-month table with totals and a per-student summary.
+- **Export to Excel**: every report has an **Export to Excel** button that downloads an `.xlsx` file (daily: report and sales list; monthly and yearly: summary, breakdown and by-student sheets). The export needs an internet connection to load the Excel library.
 - Attendance is worked out automatically: a student is present if they were given buns to sell that day.
 
 ## Data structure (Firestore)

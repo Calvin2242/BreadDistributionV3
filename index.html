@@ -7,6 +7,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{--bg:#0f1629;--bar:#0a0f1e;--card:#172240;--line:#2a3a5e;--ink:#f1f4fb;--mute:#8d9bbd;--gold:#f0b235;--teal:#3cc3ab;--bad:#ff7b6b}
 *{box-sizing:border-box}
@@ -54,13 +55,14 @@ textarea{resize:vertical}
 <div id="app"></div>
 <script>
 // PASTE YOUR FIREBASE WEB CONFIG HERE (Project settings > Your apps > Web)
-const CFG = { apiKey: "AIzaSyAVwHXRUZkkSaYBSqjgUoQNIZHINdU-m3U",
-  authDomain: "ppkismktbakery.firebaseapp.com",
-  projectId: "ppkismktbakery",
-  storageBucket: "ppkismktbakery.firebasestorage.app",
-  messagingSenderId: "571186338171",
-  appId: "1:571186338171:web:b345306a0397e11d6685de",
-  measurementId: "G-V75M1CW1KM"
+const CFG = { 
+    apiKey: "AIzaSyAVwHXRUZkkSaYBSqjgUoQNIZHINdU-m3U",
+    authDomain: "ppkismktbakery.firebaseapp.com",
+    projectId: "ppkismktbakery",
+    storageBucket: "ppkismktbakery.firebasestorage.app",
+    messagingSenderId: "571186338171",
+    appId: "1:571186338171:web:b345306a0397e11d6685de",
+    measurementId: "G-V75M1CW1KM"
  };
 firebase.initializeApp(CFG);
 const auth = firebase.auth(), db = firebase.firestore(), $ = id => document.getElementById(id);
@@ -213,7 +215,7 @@ function sumView(kind) {
     `<tr><td><b>Total</b></td>${m ? '' : `<td class="r">${v.rows.length}</td>`}<td class="r">${T('qty')}</td><td class="r">${money(T('sales'))}</td><td class="r">${money(T('cash'))}</td><td class="r">${money(T('qr'))}</td><td class="r">${money(T('spending'))}</td><td class="r">${money(T('salary'))}</td>${m ? '<td></td>' : ''}</tr></table></div>
   <div class="card scroll"><h2>By student</h2><table><tr><th>Student</th><th class="r">Made</th><th class="r">Sold</th><th class="r">Money</th></tr>` +
     Object.values(v.P).sort((a, b) => a.name.localeCompare(b.name)).map(p => `<tr><td>${esc(p.name)}</td><td class="r">${p.made}</td><td class="r">${p.sold}</td><td class="r">${money(p.money)}</td></tr>`).join('') +
-    `</table></div><p class="noprint"><button onclick="window.print()">Print report</button></p>`;
+    `</table></div><p class="noprint row"><button class="go" style="flex:2" onclick="exportSum()">Export to Excel</button><button style="flex:1" onclick="window.print()">Print report</button></p>`;
 }
 function reportView(dis, L) {
   const es = Object.values(S.stock), of = id => es.filter(e => e.studentId === id), bn = id => (S.day.breads.find(b => b.id === id) || {}).name || '';
@@ -234,8 +236,55 @@ function reportView(dis, L) {
   <div class="card"><h2>Summary</h2><table>` + R('Cash received', money(cash)) + R('QR received', money(qr)) +
     `</table><label>Remarks for the day</label><textarea id="rm" rows="4" placeholder="e.g. Everyone sold out except Asmat." ${dis}>${esc(S.day.remarks || '')}</textarea></div>
   <p class="row noprint"><button class="go" style="flex:2" onclick="saveCosts()" ${dis}>Save report</button>
-  <button style="flex:1" onclick="toggleLock()">${L ? 'Unlock day' : 'Lock day'}</button><button style="flex:1" onclick="window.print()">Print</button></p>`;
+  <button style="flex:1" onclick="toggleLock()">${L ? 'Unlock day' : 'Lock day'}</button><button style="flex:1" onclick="window.print()">Print</button></p>
+  <p class="noprint"><button class="go" onclick="exportDay()">Export to Excel</button></p>`;
 }
+
+/* ---------- excel export ---------- */
+function xl(sheets, file) {
+  if (!window.XLSX) throw Error('Excel library did not load. Check the internet connection and refresh.');
+  const wb = XLSX.utils.book_new();
+  sheets.forEach(([name, rows]) => {
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{ wch:30 }, { wch:24 }, { wch:24 }, { wch:12 }, { wch:12 }, { wch:12 }, { wch:12 }, { wch:36 }];
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  });
+  XLSX.writeFile(wb, file);
+}
+const exportDay = () => go(async () => {
+  const es = Object.values(S.stock), of = id => es.filter(e => e.studentId === id), bn = id => (S.day.breads.find(b => b.id === id) || {}).name || '';
+  const pres = S.studs.filter(s => of(s.id).some(e => e.made > 0)), abs = S.studs.filter(s => !pres.includes(s));
+  const cash = S.sales.filter(x => x.pay !== 'qr').reduce((a, x) => a + x.amount, 0), qr = S.sales.filter(x => x.pay === 'qr').reduce((a, x) => a + x.amount, 0);
+  const sales = salesTotal(), sold = es.reduce((a, e) => a + (e.sold || 0), 0);
+  const report = [[S.day.title || 'Daily sales report'], ['Class', S.clsName], ['Date', fmt(S.date)], [],
+    ['Balance brought forward', S.bal], ['Total money received (sales)', sales], ['Total money now', S.bal + sales],
+    ['Spending (raw cost)', +S.day.spending || 0], ['Salary paid', +S.day.salary || 0], ['Current balance', closing()], [],
+    ['Present', pres.length, 'Absent', abs.length, abs.map(s => s.name).join(', ')], [],
+    ['Date', 'Student', 'Made', 'Sold', 'Money'],
+    ...pres.map(s => { const e = of(s.id); return [fmt(S.date), s.name, e.filter(x => x.made > 0).map(x => x.made + ' ' + bn(x.breadId)).join(', '),
+      e.reduce((a, x) => a + (x.sold || 0), 0), e.reduce((a, x) => a + (x.sold || 0) * price(x.breadId), 0)]; }),
+    ['', 'Total', '', sold, sales], [], ['Cash received', cash], ['QR received', qr], ['Remarks', S.day.remarks || '']];
+  const list = [['Student', 'Buyer', 'Bread', 'Qty', 'Payment', 'Amount'],
+    ...S.sales.map(x => [x.studentName, x.buyer || '', x.bread, x.qty, x.pay === 'qr' ? 'QR' : 'Cash', x.amount])];
+  xl([['Daily report', report], ['Sales list', list]], `daily-report-${S.date}.xlsx`);
+});
+const exportSum = () => go(async () => {
+  const v = S.sum; if (!v) throw Error('Press Show report first.');
+  const m = v.kind === 'm', G = {};
+  v.rows.forEach(r => {
+    const k = m ? r.date : r.date.slice(0, 7), g = G[k] || (G[k] = { k, days:0, qty:0, sales:0, cash:0, qr:0, spending:0, salary:0, remarks:[] });
+    g.days++; ['qty', 'sales', 'cash', 'qr', 'spending', 'salary'].forEach(f => g[f] += r[f]); if (r.remarks) g.remarks.push(r.remarks);
+  });
+  const gs = Object.values(G), T = f => gs.reduce((a, g) => a + g[f], 0), open = v.rows[0] ? v.rows[0].balance : 0, end = open + T('sales') - T('spending') - T('salary');
+  const title = m ? MN(+S.mon.slice(5)) + ' ' + S.mon.slice(0, 4) : S.yr;
+  const summary = [[(m ? 'Monthly' : 'Yearly') + ' report', S.clsName, title], [], ['Balance at start', open], ['Total sold', T('qty')], ['Total sales', T('sales')],
+    ['Cash received', T('cash')], ['QR received', T('qr')], ['Total spending', T('spending')], ['Total salary paid', T('salary')], ['Balance at end', end]];
+  const rows = [[m ? 'Date' : 'Month', ...(m ? [] : ['Days']), 'Sold', 'Sales', 'Cash', 'QR', 'Spending', 'Salary', ...(m ? ['Remarks'] : [])],
+    ...gs.map(g => [m ? fmt(g.k) : MN(+g.k.slice(5)), ...(m ? [] : [g.days]), g.qty, g.sales, g.cash, g.qr, g.spending, g.salary, ...(m ? [g.remarks.join(' ')] : [])]),
+    ['Total', ...(m ? [] : [v.rows.length]), T('qty'), T('sales'), T('cash'), T('qr'), T('spending'), T('salary')]];
+  const st = [['Student', 'Made', 'Sold', 'Money'], ...Object.values(v.P).sort((a, b) => a.name.localeCompare(b.name)).map(p => [p.name, p.made, p.sold, p.money])];
+  xl([['Summary', summary], [m ? 'Days' : 'Months', rows], ['By student', st]], m ? `monthly-report-${S.mon}.xlsx` : `yearly-report-${S.yr}.xlsx`);
+});
 
 /* ---------- student actions ---------- */
 const me = id => { S.me = S.studs.find(s => s.id === id); S.stab = 'sell'; S.qty = 1; S.msg = ''; render(); };
