@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PPKI SMK Tansau - Bread</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+:root{--bg:#0f1629;--bar:#0a0f1e;--card:#172240;--line:#2a3a5e;--ink:#f1f4fb;--mute:#8d9bbd;--gold:#f0b235;--teal:#3cc3ab;--bad:#ff7b6b}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.4 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:var(--bar);padding:12px 16px;display:flex;align-items:center;gap:12px}
+header b{flex:1;font-size:1.15rem}
+nav{display:flex;background:#121b34;border-bottom:1px solid var(--line)}
+nav button{flex:1;background:none;border:0;border-bottom:3px solid transparent;color:var(--mute);font-weight:700;padding:14px 4px;border-radius:0}
+nav button.on{color:var(--ink);border-color:var(--gold)}
+main{max-width:720px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0}
+h2{font-size:1.1rem;margin:0 0 10px}
+label{display:block;font-weight:700;font-size:.9rem;margin:12px 0 6px}
+input,select{width:100%;font:inherit;padding:12px;background:var(--bar);color:var(--ink);border:1px solid var(--line);border-radius:8px}
+input[type=number]{width:90px}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:10px 14px}
+button.go{background:var(--gold);color:#241a00;font-weight:800;border:0;width:100%;padding:16px;font-size:1.1rem}
+button:disabled{opacity:.4;cursor:not-allowed}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.tiles{display:flex;gap:10px;flex-wrap:wrap}
+.tile{min-width:150px;text-align:left;border:2px solid var(--line);border-radius:12px;padding:14px;flex:1}
+.tile.on{border-color:var(--gold)}
+.tile small{color:var(--mute);display:block}
+.tile em{font:800 2rem/1.1 system-ui;display:block;font-style:normal}
+.who{font-size:1.4rem;font-weight:800;padding:22px 12px;min-width:46%}
+.qty{display:flex;align-items:center;justify-content:space-between}
+.qty button{width:56px;height:56px;font-size:1.6rem}
+.qty b{font-size:2rem}
+.pay{display:flex;gap:10px}.pay button{flex:1;padding:16px;font-weight:700}
+.pay button.on{background:var(--teal);color:#06201a;border-color:var(--teal)}
+.sum{background:var(--bar);border-radius:10px;text-align:center;padding:16px;margin:14px 0}
+.sum b{font-size:1.9rem}
+table{width:100%;border-collapse:collapse}
+th,td{padding:8px 4px;border-bottom:1px solid var(--line);text-align:left}
+.r{text-align:right}.mute{color:var(--mute)}.bad{color:var(--bad)}.ok{color:var(--teal);font-weight:700}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.big{font-size:1.7rem;font-weight:800;color:var(--gold)}
+.scroll{overflow-x:auto}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// PASTE YOUR FIREBASE WEB CONFIG HERE (Project settings > Your apps > Web)
+const CFG = { apiKey: "AIzaSyAVwHXRUZkkSaYBSqjgUoQNIZHINdU-m3U",
+  authDomain: "ppkismktbakery.firebaseapp.com",
+  projectId: "ppkismktbakery",
+  storageBucket: "ppkismktbakery.firebasestorage.app",
+  messagingSenderId: "571186338171",
+  appId: "1:571186338171:web:b345306a0397e11d6685de",
+  measurementId: "G-V75M1CW1KM" };
+firebase.initializeApp(CFG);
+const auth = firebase.auth(), db = firebase.firestore(), $ = id => document.getElementById(id);
+const TS = () => firebase.firestore.FieldValue.serverTimestamp();
+const today = () => new Date().toLocaleDateString('en-CA');
+const money = n => 'RM' + (+n || 0).toFixed(2);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const S = { mode:'t', user:null, classes:[], cls:null, clsName:'', date:today(), day:{breads:[]}, studs:[], stock:{}, sales:[], bal:0,
+  tab:'bread', stab:'sell', me:null, pick:null, qty:1, pay:'cash', buyer:'', msg:'', err:'', draft:{} };
+const cref = () => db.doc('classes/' + S.cls);
+const dref = () => db.doc(`classes/${S.cls}/days/${S.date}`);
+const hashCls = () => (location.hash.match(/c=(\w+)/) || [])[1];
+const price = id => ((S.day.breads || []).find(b => b.id === id) || {}).price || 0;
+const salesTotal = () => Object.values(S.stock).reduce((a, e) => a + (e.sold || 0) * price(e.breadId), 0);
+const closing = () => S.bal + salesTotal() - (+S.day.spending || 0) - (+S.day.salary || 0);
+const left = (sid, bid) => { const e = S.stock[sid + '_' + bid]; return e ? e.made - (e.sold || 0) : 0; };
+
+auth.onAuthStateChanged(async u => {
+  S.user = u;
+  const hc = hashCls();
+  if (hc) {
+    S.mode = 's'; S.cls = hc;
+    if (!u) { try { await auth.signInAnonymously(); } catch (e) { S.err = e.message; render(); } return; }
+    await loadDay();
+  } else if (u && !u.isAnonymous) {
+    S.mode = 't'; await loadClasses();
+  }
+  render();
+});
+
+async function login() {
+  try { await auth.signInWithEmailAndPassword($('em').value, $('pw').value); }
+  catch (e) { S.err = 'Cannot sign in. Check email and password.'; render(); }
+}
+async function loadClasses() {
+  const q = await db.collection('classes').where('teacherUid', '==', S.user.uid).get();
+  S.classes = q.docs.map(d => ({ id:d.id, ...d.data() }));
+  if (!S.cls && S.classes.length) S.cls = S.classes[0].id;
+  await loadDay();
+}
+async function loadDay() {
+  if (!S.cls) return;
+  const d = dref();
+  try {
+    const [cs, st, ds, ss, sl] = await Promise.all([cref().get(), cref().collection('students').get(), d.get(),
+      d.collection('stock').get(), d.collection('sales').orderBy('ts', 'desc').get()]);
+    S.clsName = cs.exists ? cs.data().name : '';
+    S.studs = st.docs.map(x => ({ id:x.id, ...x.data() })).sort((a, b) => a.name.localeCompare(b.name));
+    S.day = ds.exists ? ds.data() : { breads:[], spending:0, salary:0, locked:false };
+    S.day.breads = S.day.breads || [];
+    S.stock = {}; ss.docs.forEach(x => S.stock[x.id] = x.data());
+    S.sales = sl.docs.map(x => ({ id:x.id, ...x.data() }));
+    if (S.mode === 't') await loadBal();
+    if (!S.day.breads.find(b => b.id === S.pick)) S.pick = (S.day.breads[0] || {}).id;
+  } catch (e) { S.err = e.message; }
+}
+async function loadBal() {
+  const pv = await db.collection(`classes/${S.cls}/days`).where('date', '<', S.date).orderBy('date', 'desc').limit(1).get();
+  if (pv.empty) { S.bal = 0; return; }
+  const p = pv.docs[0], pd = p.data(), ps = await p.ref.collection('stock').get();
+  const pr = {}; (pd.breads || []).forEach(b => pr[b.id] = b.price);
+  const sales = ps.docs.reduce((a, x) => a + (x.data().sold || 0) * (pr[x.data().breadId] || 0), 0);
+  S.bal = (pd.balance || 0) + sales - (pd.spending || 0) - (pd.salary || 0);
+}
+async function persist() {
+  await dref().set({ ...S.day, date:S.date, balance:S.bal, sales:salesTotal(), closing:closing() }, { merge:true });
+}
+const go = async f => { try { S.err = ''; await f(); } catch (e) { S.err = e.message; } render(); };
+
+/* ---------- teacher actions ---------- */
+const addClass = () => go(async () => {
+  const name = prompt('Class name?'); if (!name) return;
+  const r = await db.collection('classes').add({ name, teacherUid:S.user.uid });
+  S.cls = r.id; await loadClasses();
+});
+const addStudent = () => go(async () => {
+  const name = prompt('Student name?'); if (!name) return;
+  await cref().collection('students').add({ name: name.trim() }); await loadDay();
+});
+const pickClass = id => go(async () => { S.cls = id; S.draft = {}; await loadDay(); });
+const setDate = d => go(async () => { S.date = d || today(); S.draft = {}; await loadDay(); });
+const tab = t => { S.tab = t; render(); };
+const addBread = () => { S.day.breads.push({ id:'b' + Date.now().toString(36), name:'', price:0 }); render(); };
+const delBread = i => { S.day.breads.splice(i, 1); render(); };
+const saveBread = () => go(async () => {
+  S.day.breads = S.day.breads.filter(b => b.name.trim());
+  const batch = db.batch();
+  for (const s of S.studs) for (const b of S.day.breads) {
+    const k = s.id + '_' + b.id, old = S.stock[k] || { sold:0, made:0 };
+    const made = Math.max(0, parseInt(k in S.draft ? S.draft[k] : old.made) || 0);
+    if (made < (old.sold || 0)) throw Error(s.name + ' already sold ' + old.sold + ' ' + b.name);
+    batch.set(dref().collection('stock').doc(k), { studentId:s.id, breadId:b.id, made, sold:old.sold || 0 });
+  }
+  await batch.commit(); S.draft = {}; await persist(); await loadDay();
+});
+const saveCosts = () => go(async () => {
+  S.day.spending = +$('sp').value || 0; S.day.salary = +$('sa').value || 0; await persist();
+});
+const toggleLock = () => go(async () => { S.day.locked = !S.day.locked; await persist(); });
+const delSale = id => go(async () => {
+  const s = S.sales.find(x => x.id === id);
+  if (S.day.locked || !confirm('Remove this sale?')) return;
+  await db.runTransaction(async t => {
+    const r = dref().collection('stock').doc(s.studentId + '_' + s.breadId), d = await t.get(r);
+    t.update(r, { sold: Math.max(0, (d.data().sold || 0) - s.qty) });
+    t.delete(dref().collection('sales').doc(id));
+  });
+  await loadDay(); await persist();
+});
+
+/* ---------- student actions ---------- */
+const me = id => { S.me = S.studs.find(s => s.id === id); S.stab = 'sell'; S.qty = 1; S.msg = ''; render(); };
+const notMe = () => { S.me = null; S.msg = ''; render(); };
+const pickBread = id => { S.pick = id; S.qty = 1; render(); };
+const step = n => { const m = left(S.me.id, S.pick); S.qty = Math.min(Math.max(1, S.qty + n), Math.max(1, m)); render(); };
+const setPay = p => { S.pay = p; render(); };
+const record = () => go(async () => {
+  const b = S.day.breads.find(x => x.id === S.pick), k = S.me.id + '_' + b.id, q = S.qty;
+  try {
+    await db.runTransaction(async t => {
+      const r = dref().collection('stock').doc(k), d = await t.get(r), e = d.data() || { made:0, sold:0 };
+      if ((e.sold || 0) + q > e.made) throw Error('Only ' + (e.made - (e.sold || 0)) + ' left');
+      t.update(r, { sold:(e.sold || 0) + q });
+      t.set(dref().collection('sales').doc(), { studentId:S.me.id, studentName:S.me.name, breadId:b.id, bread:b.name,
+        buyer:S.buyer.trim(), qty:q, pay:S.pay, amount:q * b.price, ts:TS() });
+    });
+    S.qty = 1; S.buyer = ''; S.msg = 'Sale recorded.';
+  } catch (e) { S.msg = e.message; }
+  await loadDay();
+});
+
+/* ---------- views ---------- */
+const head = right => `<header><b>PPKI SMK Tansau</b>${right || ''}</header>`;
+function render() {
+  const A = $('app');
+  if (S.mode === 's') { A.innerHTML = studentView(); return; }
+  if (!S.user || S.user.isAnonymous) {
+    A.innerHTML = head() + `<main><div class="card"><h2>Teacher sign in</h2><label>Email</label><input id="em" type="email">
+    <label>Password</label><input id="pw" type="password"><p><button class="go" onclick="login()">Sign in</button></p>
+    <p class="bad">${esc(S.err)}</p></div></main>`; return;
+  }
+  A.innerHTML = teacherView();
+}
+function studentView() {
+  const h = head(`<span class="mute">${esc(S.clsName)} · ${S.date}</span>`);
+  if (S.err) return h + `<main><div class="card bad">${esc(S.err)}</div></main>`;
+  if (!S.day.breads.length) return h + `<main><div class="card">Your teacher has not added bread for today yet.</div></main>`;
+  if (!S.me) return h + `<main><div class="card"><h2>Who are you?</h2><div class="tiles">` +
+    S.studs.map(s => `<button class="tile who" onclick="me('${s.id}')">${esc(s.name)}</button>`).join('') + `</div></div></main>`;
+  const L = S.day.locked;
+  const nav = `<nav><button class="${S.stab === 'sell' ? 'on' : ''}" onclick="S.stab='sell';render()">Sell</button>
+  <button class="${S.stab === 'mine' ? 'on' : ''}" onclick="S.stab='mine';render()">My sales</button>
+  <button onclick="notMe()">Not ${esc(S.me.name.split(' ')[0])}?</button></nav>`;
+  if (S.stab === 'mine') {
+    const mine = S.sales.filter(x => x.studentId === S.me.id), sum = p => mine.filter(x => !p || x.pay === p).reduce((a, x) => a + x.amount, 0);
+    return h + nav + `<main><div class="card"><h2>${esc(S.me.name)}</h2><p>Cash ${money(sum('cash'))} · QR ${money(sum('qr'))}</p>
+    <div class="big">Total ${money(sum())}</div></div><div class="card scroll"><table>` +
+      (mine.map(x => `<tr><td>${x.qty} × ${esc(x.bread)}</td><td>${esc(x.buyer)}</td><td>${x.pay === 'qr' ? 'QR' : 'Cash'}</td><td class="r">${money(x.amount)}</td></tr>`).join('') || '<tr><td class="mute">No sales yet.</td></tr>') + '</table></div>';
+  }
+  const b = S.day.breads.find(x => x.id === S.pick), lf = b ? left(S.me.id, b.id) : 0, q = Math.min(S.qty, Math.max(1, lf));
+  return h + nav + `<main><div class="tiles">` + S.day.breads.map(x => `<button class="tile ${x.id === S.pick ? 'on' : ''}" onclick="pickBread('${x.id}')">
+    <b>${esc(x.name)}</b><small>${money(x.price)} each</small><em>${left(S.me.id, x.id)}</em><small>left</small></button>`).join('') + `</div>
+  <div class="card"><label>Buyer's name</label><input value="${esc(S.buyer)}" oninput="S.buyer=this.value" placeholder="e.g. Cikgu Aminah">
+  <label>How many?</label><div class="qty"><button onclick="step(-1)" aria-label="Less">−</button><b>${q}</b><button onclick="step(1)" aria-label="More">+</button></div>
+  <label>Payment</label><div class="pay"><button class="${S.pay === 'cash' ? 'on' : ''}" onclick="setPay('cash')">Cash</button>
+  <button class="${S.pay === 'qr' ? 'on' : ''}" onclick="setPay('qr')">QR</button></div>
+  <div class="sum"><div class="mute">${q} × ${b ? esc(b.name) : ''} @ ${money(b && b.price)}</div><b>Total ${money(q * (b ? b.price : 0))}</b></div>
+  <button class="go" onclick="record()" ${L || lf < 1 ? 'disabled' : ''}>${L ? 'Day is closed' : lf < 1 ? 'Sold out' : 'Record sale'}</button>
+  <p class="${S.msg === 'Sale recorded.' ? 'ok' : 'bad'}">${esc(S.msg)}</p></div></main>`;
+}
+function teacherView() {
+  const L = S.day.locked, dis = L ? 'disabled' : '';
+  const link = location.origin + location.pathname + '#c=' + S.cls;
+  let h = head(`<input type="date" style="width:auto" value="${S.date}" onchange="setDate(this.value)"><button onclick="auth.signOut()">Sign out</button>`);
+  h += `<main><div class="row"><select style="flex:1" onchange="pickClass(this.value)">${S.classes.map(k => `<option value="${k.id}" ${k.id === S.cls ? 'selected' : ''}>${esc(k.name)}</option>`).join('')}</select>
+  <button onclick="addClass()">Add class</button><button onclick="addStudent()" ${S.cls ? '' : 'disabled'}>Add student</button></div>`;
+  if (!S.cls) return h + '<div class="card">Add your first class to begin.</div></main>';
+  h += `<div class="card"><label>Student link (open on student devices, no sign in)</label><input readonly value="${esc(link)}" onclick="this.select()"></div>
+  <p class="${L ? 'ok' : ''}">${L ? 'This day is locked.' : ''}<span class="bad"> ${esc(S.err)}</span></p>
+  <nav>${[['bread', 'Add bread'], ['sales', 'Sales today'], ['rep', 'Report']].map(t => `<button class="${S.tab === t[0] ? 'on' : ''}" onclick="tab('${t[0]}')">${t[1]}</button>`).join('')}</nav>`;
+  const bs = S.day.breads;
+  if (S.tab === 'bread') {
+    h += `<div class="card"><h2>Bread for ${S.date}</h2>` + bs.map((b, i) => `<div class="row" style="margin-bottom:8px">
+      <input style="flex:1" placeholder="Bread name" value="${esc(b.name)}" onchange="S.day.breads[${i}].name=this.value" ${dis}>
+      <input type="number" step="0.01" min="0" placeholder="RM" value="${b.price || ''}" onchange="S.day.breads[${i}].price=+this.value||0" ${dis}>
+      <button onclick="delBread(${i})" ${dis}>Remove</button></div>`).join('') +
+      `<button onclick="addBread()" ${dis}>Add bread type</button></div>
+    <div class="card scroll"><h2>Buns made per student</h2><table><tr><th>Student</th>${bs.map(b => `<th>${esc(b.name || '?')}</th>`).join('')}</tr>` +
+      S.studs.map(s => `<tr><td>${esc(s.name)}</td>` + bs.map(b => { const k = s.id + '_' + b.id;
+        return `<td><input type="number" min="0" value="${k in S.draft ? S.draft[k] : (S.stock[k] || {}).made || 0}" onchange="S.draft['${k}']=this.value" ${dis}></td>`; }).join('') + '</tr>').join('') +
+      `</table><p><button class="go" onclick="saveBread()" ${dis}>Save bread and quantities</button></p></div>`;
+  } else if (S.tab === 'sales') {
+    const t = p => S.sales.filter(x => x.pay === p).reduce((a, x) => a + x.amount, 0);
+    h += `<div class="card scroll"><table><tr><th>Student</th><th class="r">Made</th><th class="r">Sold</th><th class="r">Left</th><th class="r">Money</th></tr>` +
+      S.studs.map(s => { const es = Object.values(S.stock).filter(e => e.studentId === s.id), m = es.reduce((a, e) => a + e.made, 0), so = es.reduce((a, e) => a + (e.sold || 0), 0);
+        return `<tr><td>${esc(s.name)}</td><td class="r">${m}</td><td class="r">${so}</td><td class="r">${m - so}</td><td class="r">${money(es.reduce((a, e) => a + (e.sold || 0) * price(e.breadId), 0))}</td></tr>`; }).join('') +
+      `</table><p>Cash ${money(t('cash'))} · QR ${money(t('qr'))}</p></div><div class="card scroll"><table>` +
+      (S.sales.map(x => `<tr><td>${esc(x.studentName)}</td><td>${x.qty} × ${esc(x.bread)}</td><td>${esc(x.buyer)}</td><td>${x.pay === 'qr' ? 'QR' : 'Cash'}</td><td class="r">${money(x.amount)}</td>
+      <td><button onclick="delSale('${x.id}')" ${dis}>Remove</button></td></tr>`).join('') || '<tr><td class="mute">No sales yet.</td></tr>') + '</table></div>';
+  } else {
+    h += `<div class="card"><h2>Daily report</h2><table>
+    <tr><td>Balance brought forward</td><td class="r">${money(S.bal)}</td></tr>
+    <tr><td>Total sales</td><td class="r">${money(salesTotal())}</td></tr>
+    <tr><td>Spending (raw cost)</td><td class="r"><input id="sp" type="number" step="0.01" min="0" value="${S.day.spending || ''}" ${dis}></td></tr>
+    <tr><td>Salary paid</td><td class="r"><input id="sa" type="number" step="0.01" min="0" value="${S.day.salary || ''}" ${dis}></td></tr>
+    <tr><td><b>Total money</b></td><td class="r big">${money(closing())}</td></tr></table>
+    <p class="row"><button class="go" style="flex:2" onclick="saveCosts()" ${dis}>Save report</button><button style="flex:1" onclick="toggleLock()">${L ? 'Unlock day' : 'Lock day'}</button></p></div>`;
+  }
+  return h + '</main>';
+}
+render();
+</script>
+</body>
+</html>
