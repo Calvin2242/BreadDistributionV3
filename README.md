@@ -69,9 +69,9 @@ The app has no sign-up screen, so only accounts you create can sign in. In **Aut
    - Add the bread types and prices for the day.
    - Enter how many each student made.
    - Click **Save bread and quantities**.
-4. Copy the **student link** at the top of the screen and open it on the student devices.
+4. Use the **student link** at the top of the screen. Press **Open student page** to go straight to the selling side, or **Copy** to send it to student devices.
 5. During the day, check the **Sales today** tab for each student's made, sold and left, and the cash and QR totals. A wrongly recorded sale can be removed there, and the buns go back to that student's stock.
-6. At the end of the day, open the **Report** tab, type the **spending** and **salary paid**, and click **Save report**. Click **Lock day** when you are done.
+6. At the end of the day, open the **Report** tab, type the **spending**, **salary paid** and any **remarks**, and click **Save report**. Click **Lock day** when you are done.
 
 ### Student
 
@@ -94,6 +94,13 @@ Total money = Balance brought forward + Total sales − Salary paid − Spending
 | Spending (raw cost) | Typed by the teacher |
 | Salary paid | Typed by the teacher |
 | Total money | Calculated, and carried to the next day |
+
+## Reports
+
+- **Daily report** (Report tab): title, date, balance brought forward, total money received, total money now, spending, salary paid, current balance, attendance (present and absent names), a per-student table of made, sold and money, cash and QR received, and the teacher's remarks. Use **Print** to print it.
+- **Monthly report**: pick a month and press **Show report** for a day-by-day table with totals, remarks, and a per-student summary.
+- **Yearly report**: pick a year for a month-by-month table with totals and a per-student summary.
+- Attendance is worked out automatically: a student is present if they were given buns to sell that day.
 
 ## Data structure (Firestore)
 
