@@ -7,7 +7,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
 :root{--bg:#0f1629;--bar:#0a0f1e;--card:#172240;--line:#2a3a5e;--ink:#f1f4fb;--mute:#8d9bbd;--gold:#f0b235;--teal:#3cc3ab;--bad:#ff7b6b}
 *{box-sizing:border-box}
@@ -55,15 +55,7 @@ textarea{resize:vertical}
 <div id="app"></div>
 <script>
 // PASTE YOUR FIREBASE WEB CONFIG HERE (Project settings > Your apps > Web)
-const CFG = { 
-    apiKey: "AIzaSyAVwHXRUZkkSaYBSqjgUoQNIZHINdU-m3U",
-    authDomain: "ppkismktbakery.firebaseapp.com",
-    projectId: "ppkismktbakery",
-    storageBucket: "ppkismktbakery.firebasestorage.app",
-    messagingSenderId: "571186338171",
-    appId: "1:571186338171:web:b345306a0397e11d6685de",
-    measurementId: "G-V75M1CW1KM"
- };
+const CFG = { apiKey:"", authDomain:"", projectId:"", appId:"" };
 firebase.initializeApp(CFG);
 const auth = firebase.auth(), db = firebase.firestore(), $ = id => document.getElementById(id);
 const TS = () => firebase.firestore.FieldValue.serverTimestamp();
@@ -188,7 +180,9 @@ const loadSummary = kind => go(async () => {
     const r = { date:x.date, qty:0, cash:0, qr:0, spending:x.spending || 0, salary:x.salary || 0, balance:x.balance || 0, remarks:x.remarks || '' };
     sl.docs.forEach(s => { const e = s.data(), p = pp(e.studentId); r.qty += e.qty; r[e.pay === 'qr' ? 'qr' : 'cash'] += e.amount; p.sold += e.qty; p.money += e.amount; });
     st.docs.forEach(s => { pp(s.data().studentId).made += s.data().made || 0; });
-    r.sales = r.cash + r.qr; return r;
+    r.sales = r.cash + r.qr;
+    r.det = { day:x, bal:x.balance || 0, sales:sl.docs.map(s => ({ id:s.id, ...s.data() })), stock:st.docs.map(s => s.data()) };
+    return r;
   }));
   S.sum = { kind, rows, P };
 });
@@ -241,49 +235,97 @@ function reportView(dis, L) {
 }
 
 /* ---------- excel export ---------- */
-function xl(sheets, file) {
-  if (!window.XLSX) throw Error('Excel library did not load. Check the internet connection and refresh.');
-  const wb = XLSX.utils.book_new();
-  sheets.forEach(([name, rows]) => {
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [{ wch:30 }, { wch:24 }, { wch:24 }, { wch:12 }, { wch:12 }, { wch:12 }, { wch:12 }, { wch:36 }];
-    XLSX.utils.book_append_sheet(wb, ws, name);
-  });
-  XLSX.writeFile(wb, file);
+const BD = { top:{ style:'thin' }, left:{ style:'thin' }, bottom:{ style:'thin' }, right:{ style:'thin' } };
+const HF = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF4F81BD' } }, MF = '#,##0.00';
+const xd = s => { const [y, m, d] = s.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)); };
+const tsv = x => (x.ts && x.ts.seconds) || 0;
+const byStudent = a => [...a].sort((p, q) => (p.studentName || '').localeCompare(q.studentName || '') || tsv(p) - tsv(q));
+const widths = a => a.map(width => ({ width }));
+function put(ws, r, c, v, o = {}) {
+  const x = ws.getCell(r, c);
+  x.value = v; x.font = { name:'Calibri', size:12 }; x.border = BD;
+  if (o.h) x.fill = HF;
+  if (v instanceof Date) x.numFmt = 'dd/mm/yyyy'; else if (o.m) x.numFmt = MF;
+  if (o.al) x.alignment = { horizontal:o.al, vertical:'middle' };
+  return x;
+}
+async function saveWb(wb, file) {
+  const buf = await wb.xlsx.writeBuffer(), a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  a.download = file; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+const newWb = () => { if (!window.ExcelJS) throw Error('Excel library did not load. Check the internet connection and refresh.'); return new ExcelJS.Workbook(); };
+// One day's report sheet. d = { date, day, bal, sales[], stock[] }
+function dayBook(wb, name, d) {
+  const ws = wb.addWorksheet(name), dy = d.day, br = id => (dy.breads || []).find(b => b.id === id) || {};
+  ws.columns = widths([30.9, 24.9, 24.9, 12.9, 12.9, 12.9]);
+  const of = id => d.stock.filter(e => e.studentId === id), pres = S.studs.filter(s => of(s.id).some(e => e.made > 0)), abs = S.studs.filter(s => !pres.includes(s));
+  const cash = d.sales.filter(x => x.pay !== 'qr').reduce((a, x) => a + x.amount, 0), qr = d.sales.filter(x => x.pay === 'qr').reduce((a, x) => a + x.amount, 0);
+  const sold = d.stock.reduce((a, e) => a + (e.sold || 0), 0), sales = d.stock.reduce((a, e) => a + (e.sold || 0) * (br(e.breadId).price || 0), 0);
+  const spend = +dy.spending || 0, sal = +dy.salary || 0;
+  put(ws, 1, 1, dy.title || 'Daily sales report', { h:1, al:'center' }); ws.mergeCells(1, 1, 1, 2);
+  put(ws, 2, 1, 'Class'); put(ws, 2, 2, S.clsName, { al:'left' }); put(ws, 3, 1, 'Date'); put(ws, 3, 2, xd(d.date), { al:'left' });
+  [['Balance brought forward', d.bal], ['Total money received (sales)', sales], ['Total money now', d.bal + sales], ['Spending (raw cost)', spend],
+    ['Salary paid', sal], ['Current balance', d.bal + sales - spend - sal]].forEach((x, i) => { put(ws, 5 + i, 1, x[0]); put(ws, 5 + i, 2, x[1], { m:1 }); });
+  put(ws, 12, 1, 'Present'); put(ws, 12, 2, pres.length); put(ws, 12, 3, 'Absent'); put(ws, 12, 4, abs.length);
+  if (abs.length) put(ws, 12, 5, abs.map(s => s.name).join(', '));
+  ['Date', 'Student', 'Made', 'Sold', 'Money'].forEach((h, i) => put(ws, 14, i + 1, h, { h:1 }));
+  pres.forEach((s, j) => { const e = of(s.id), r = 15 + j;
+    put(ws, r, 1, xd(d.date)); put(ws, r, 2, s.name); put(ws, r, 3, e.filter(x => x.made > 0).map(x => x.made + ' ' + (br(x.breadId).name || '')).join(', '));
+    put(ws, r, 4, e.reduce((a, x) => a + (x.sold || 0), 0)); put(ws, r, 5, e.reduce((a, x) => a + (x.sold || 0) * (br(x.breadId).price || 0), 0), { m:1 }); });
+  let r = 15 + pres.length;
+  put(ws, r, 1, 'Total', { al:'center' }); ws.mergeCells(r, 1, r, 3); put(ws, r, 4, sold); put(ws, r, 5, sales, { m:1 });
+  r += 2;
+  put(ws, r, 1, 'Cash received'); put(ws, r, 2, cash, { m:1 }); put(ws, r + 1, 1, 'QR received'); put(ws, r + 1, 2, qr, { m:1 });
+  const rm = dy.remarks || '', c = put(ws, r + 2, 1, 'Remarks'); put(ws, r + 2, 2, rm);
+  ws.getCell(r + 2, 2).alignment = { wrapText:true, vertical:'top', horizontal:'left' }; ws.mergeCells(r + 2, 2, r + 2, 5);
+  ws.getRow(r + 2).height = Math.max(16, 16 * Math.ceil(rm.length / 60));
+}
+// "Date:" row, blue header, then that day's sales grouped by student. Returns the row where the next block starts.
+function salesBlock(ws, r, date, sales) {
+  put(ws, r, 1, 'Date:'); put(ws, r, 2, xd(date));
+  ['Student', 'Buyer', 'Bread', 'Qty', 'Payment', 'Amount'].forEach((h, i) => put(ws, r + 1, i + 1, h, { h:1 }));
+  byStudent(sales).forEach((x, j) => { const q = r + 2 + j;
+    put(ws, q, 1, x.studentName || ''); put(ws, q, 2, x.buyer || ''); put(ws, q, 3, x.bread || ''); put(ws, q, 4, x.qty);
+    put(ws, q, 5, x.pay === 'qr' ? 'QR' : 'Cash'); put(ws, q, 6, x.amount, { m:1 }); });
+  return r + sales.length + 3;
 }
 const exportDay = () => go(async () => {
-  const es = Object.values(S.stock), of = id => es.filter(e => e.studentId === id), bn = id => (S.day.breads.find(b => b.id === id) || {}).name || '';
-  const pres = S.studs.filter(s => of(s.id).some(e => e.made > 0)), abs = S.studs.filter(s => !pres.includes(s));
-  const cash = S.sales.filter(x => x.pay !== 'qr').reduce((a, x) => a + x.amount, 0), qr = S.sales.filter(x => x.pay === 'qr').reduce((a, x) => a + x.amount, 0);
-  const sales = salesTotal(), sold = es.reduce((a, e) => a + (e.sold || 0), 0);
-  const report = [[S.day.title || 'Daily sales report'], ['Class', S.clsName], ['Date', fmt(S.date)], [],
-    ['Balance brought forward', S.bal], ['Total money received (sales)', sales], ['Total money now', S.bal + sales],
-    ['Spending (raw cost)', +S.day.spending || 0], ['Salary paid', +S.day.salary || 0], ['Current balance', closing()], [],
-    ['Present', pres.length, 'Absent', abs.length, abs.map(s => s.name).join(', ')], [],
-    ['Date', 'Student', 'Made', 'Sold', 'Money'],
-    ...pres.map(s => { const e = of(s.id); return [fmt(S.date), s.name, e.filter(x => x.made > 0).map(x => x.made + ' ' + bn(x.breadId)).join(', '),
-      e.reduce((a, x) => a + (x.sold || 0), 0), e.reduce((a, x) => a + (x.sold || 0) * price(x.breadId), 0)]; }),
-    ['', 'Total', '', sold, sales], [], ['Cash received', cash], ['QR received', qr], ['Remarks', S.day.remarks || '']];
-  const list = [['Student', 'Buyer', 'Bread', 'Qty', 'Payment', 'Amount'],
-    ...S.sales.map(x => [x.studentName, x.buyer || '', x.bread, x.qty, x.pay === 'qr' ? 'QR' : 'Cash', x.amount])];
-  xl([['Daily report', report], ['Sales list', list]], `daily-report-${S.date}.xlsx`);
+  const wb = newWb();
+  dayBook(wb, 'Daily report', { date:S.date, day:S.day, bal:S.bal, sales:S.sales, stock:Object.values(S.stock) });
+  const ws = wb.addWorksheet('Sales list'); ws.columns = widths([30.9, 24.9, 24.9, 12.9, 12.9, 12.9]);
+  salesBlock(ws, 1, S.date, S.sales);
+  await saveWb(wb, `daily-report-${S.date}.xlsx`);
 });
 const exportSum = () => go(async () => {
   const v = S.sum; if (!v) throw Error('Press Show report first.');
-  const m = v.kind === 'm', G = {};
+  const m = v.kind === 'm', G = {}, wb = newWb();
   v.rows.forEach(r => {
     const k = m ? r.date : r.date.slice(0, 7), g = G[k] || (G[k] = { k, days:0, qty:0, sales:0, cash:0, qr:0, spending:0, salary:0, remarks:[] });
     g.days++; ['qty', 'sales', 'cash', 'qr', 'spending', 'salary'].forEach(f => g[f] += r[f]); if (r.remarks) g.remarks.push(r.remarks);
   });
   const gs = Object.values(G), T = f => gs.reduce((a, g) => a + g[f], 0), open = v.rows[0] ? v.rows[0].balance : 0, end = open + T('sales') - T('spending') - T('salary');
   const title = m ? MN(+S.mon.slice(5)) + ' ' + S.mon.slice(0, 4) : S.yr;
-  const summary = [[(m ? 'Monthly' : 'Yearly') + ' report', S.clsName, title], [], ['Balance at start', open], ['Total sold', T('qty')], ['Total sales', T('sales')],
-    ['Cash received', T('cash')], ['QR received', T('qr')], ['Total spending', T('spending')], ['Total salary paid', T('salary')], ['Balance at end', end]];
-  const rows = [[m ? 'Date' : 'Month', ...(m ? [] : ['Days']), 'Sold', 'Sales', 'Cash', 'QR', 'Spending', 'Salary', ...(m ? ['Remarks'] : [])],
-    ...gs.map(g => [m ? fmt(g.k) : MN(+g.k.slice(5)), ...(m ? [] : [g.days]), g.qty, g.sales, g.cash, g.qr, g.spending, g.salary, ...(m ? [g.remarks.join(' ')] : [])]),
-    ['Total', ...(m ? [] : [v.rows.length]), T('qty'), T('sales'), T('cash'), T('qr'), T('spending'), T('salary')]];
-  const st = [['Student', 'Made', 'Sold', 'Money'], ...Object.values(v.P).sort((a, b) => a.name.localeCompare(b.name)).map(p => [p.name, p.made, p.sold, p.money])];
-  xl([['Summary', summary], [m ? 'Days' : 'Months', rows], ['By student', st]], m ? `monthly-report-${S.mon}.xlsx` : `yearly-report-${S.yr}.xlsx`);
+  const ws = wb.addWorksheet(m ? title : 'Year ' + S.yr);
+  ws.columns = widths([30.9, 14, 14, 14, 14, 14, 14, m ? 40 : 14]);
+  put(ws, 1, 1, (m ? 'Monthly' : 'Yearly') + ' report: ' + title, { h:1, al:'center' }); ws.mergeCells(1, 1, 1, 2);
+  put(ws, 2, 1, 'Class'); put(ws, 2, 2, S.clsName, { al:'left' });
+  [['Balance at start', open], ['Total sold', T('qty')], ['Total sales', T('sales')], ['Cash received', T('cash')], ['QR received', T('qr')],
+    ['Total spending', T('spending')], ['Total salary paid', T('salary')], ['Balance at end', end]].forEach((x, i) => { put(ws, 4 + i, 1, x[0]); put(ws, 4 + i, 2, x[1], { m:i !== 1 }); });
+  const head = [m ? 'Date' : 'Month', ...(m ? [] : ['Days']), 'Sold', 'Sales', 'Cash', 'QR', 'Spending', 'Salary', ...(m ? ['Remarks'] : [])], mon = ['Sales', 'Cash', 'QR', 'Spending', 'Salary'];
+  head.forEach((h, i) => put(ws, 13, i + 1, h, { h:1 }));
+  const body = [...gs.map(g => [m ? xd(g.k) : MN(+g.k.slice(5)), ...(m ? [] : [g.days]), g.qty, g.sales, g.cash, g.qr, g.spending, g.salary, ...(m ? [g.remarks.join(' ')] : [])]),
+    ['Total', ...(m ? [] : [v.rows.length]), T('qty'), T('sales'), T('cash'), T('qr'), T('spending'), T('salary'), ...(m ? [''] : [])]];
+  body.forEach((row, j) => row.forEach((x, i) => put(ws, 14 + j, i + 1, x, { m:mon.includes(head[i]) })));
+  const s0 = 14 + body.length + 1;
+  ['Student', 'Made', 'Sold', 'Money'].forEach((h, i) => put(ws, s0, i + 1, h, { h:1 }));
+  Object.values(v.P).sort((a, b) => a.name.localeCompare(b.name)).forEach((p, j) => { put(ws, s0 + 1 + j, 1, p.name); put(ws, s0 + 1 + j, 2, p.made); put(ws, s0 + 1 + j, 3, p.sold); put(ws, s0 + 1 + j, 4, p.money, { m:1 }); });
+  if (m) {   // one sheet per day with records, then one Sales sheet with every day's sales
+    v.rows.forEach(r => dayBook(wb, r.date.split('-').reverse().join('-'), { date:r.date, day:r.det.day, bal:r.det.bal, sales:r.det.sales, stock:r.det.stock }));
+    const sw = wb.addWorksheet('Sales'); sw.columns = widths([30.9, 24.9, 24.9, 12.9, 12.9, 12.9]);
+    let n = 1; v.rows.forEach(r => { n = salesBlock(sw, n, r.date, r.det.sales); });
+  }
+  await saveWb(wb, m ? `monthly-report-${S.mon}.xlsx` : `yearly-report-${S.yr}.xlsx`);
 });
 
 /* ---------- student actions ---------- */
