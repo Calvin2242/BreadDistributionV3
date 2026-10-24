@@ -55,7 +55,13 @@ textarea{resize:vertical}
 <div id="app"></div>
 <script>
 // PASTE YOUR FIREBASE WEB CONFIG HERE (Project settings > Your apps > Web)
-const CFG = { apiKey:"", authDomain:"", projectId:"", appId:"" };
+const CFG = { apiKey: "AIzaSyAVwHXRUZkkSaYBSqjgUoQNIZHINdU-m3U",
+  authDomain: "ppkismktbakery.firebaseapp.com",
+  projectId: "ppkismktbakery",
+  storageBucket: "ppkismktbakery.firebasestorage.app",
+  messagingSenderId: "571186338171",
+  appId: "1:571186338171:web:b345306a0397e11d6685de",
+  measurementId: "G-V75M1CW1KM" };
 firebase.initializeApp(CFG);
 const auth = firebase.auth(), db = firebase.firestore(), $ = id => document.getElementById(id);
 const TS = () => firebase.firestore.FieldValue.serverTimestamp();
