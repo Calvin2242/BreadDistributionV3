@@ -74,7 +74,7 @@ The app has no sign-up screen, so only accounts you create can sign in. In **Aut
 ### Payment QR code
 
 1. In the teacher view, open **Payment QR code** under the student link.
-2. Upload a picture of the class's QR code (a screenshot or photo works). The app shrinks it automatically.
+2. Choose a picture of the class's QR code (a screenshot or photo works). A crop screen opens: drag the square over the QR code, drag a corner to resize it, then press **Use this crop**. The app shrinks the cropped image automatically.
 3. When a student chooses **QR**, the code appears on their screen so the buyer can scan it. Tapping the code enlarges it.
 4. Each class has its own QR code. Use **Replace** or **Remove** to change it.
 
