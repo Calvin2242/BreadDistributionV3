@@ -48,11 +48,23 @@ th,td{padding:8px 4px;border-bottom:1px solid var(--line);text-align:left}
 .scroll{overflow-x:auto}
 textarea{resize:vertical}
 .btn{display:inline-block;text-decoration:none;font:inherit;border-radius:8px;padding:10px 14px;background:var(--gold);color:#241a00;font-weight:800}
-@media print{body{background:#fff;color:#000}header,nav,.noprint,button,.btn{display:none!important}.card{background:#fff;border:0;color:#000;padding:4px 0}input,textarea{background:#fff;color:#000;border:0;padding:0}.mute{color:#444}.big{color:#000}th,td{border-color:#999}}
+summary{cursor:pointer;padding:2px 0}
+input[type=file]{padding:10px}
+.qrbox{text-align:center;margin:12px 0}
+.qrbox img{display:block;margin:8px auto;max-width:100%;max-height:50vh;background:#fff;padding:10px;border-radius:10px;cursor:zoom-in}
+.zoom{position:fixed;inset:0;background:#fff;color:#000;z-index:8;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:zoom-out}
+.zoom img{max-width:96vw;max-height:88vh}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(16px);max-width:92vw;padding:14px 22px;border-radius:10px;font-weight:700;background:var(--teal);color:#06201a;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:9;box-shadow:0 6px 20px #0008}
+#toast.show{opacity:1;transform:translateX(-50%)}
+#toast.bad{background:var(--bad);color:#2a0803}
+#toast.busy{background:var(--card);color:var(--ink);border:1px solid var(--line)}
+@media (prefers-reduced-motion:reduce){#toast{transition:none}}
+@media print{#toast{display:none}body{background:#fff;color:#000}header,nav,.noprint,button,.btn{display:none!important}.card{background:#fff;border:0;color:#000;padding:4px 0}input,textarea{background:#fff;color:#000;border:0;padding:0}.mute{color:#444}.big{color:#000}th,td{border-color:#999}}
 </style>
 </head>
 <body>
 <div id="app"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 <script>
 // PASTE YOUR FIREBASE WEB CONFIG HERE (Project settings > Your apps > Web)
 const CFG = { apiKey: "AIzaSyAVwHXRUZkkSaYBSqjgUoQNIZHINdU-m3U",
@@ -69,7 +81,7 @@ const today = () => new Date().toLocaleDateString('en-CA');
 const money = n => 'RM' + (+n || 0).toFixed(2);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const S = { mode:'t', user:null, classes:[], cls:null, clsName:'', date:today(), day:{breads:[]}, studs:[], stock:{}, sales:[], bal:0,
-  tab:'bread', stab:'sell', me:null, pick:null, qty:1, pay:'cash', buyer:'', msg:'', err:'', draft:{}, mon:today().slice(0, 7), yr:today().slice(0, 4), sum:null };
+  tab:'bread', stab:'sell', me:null, pick:null, qty:1, pay:'cash', buyer:'', msg:'', err:'', draft:{}, mon:today().slice(0, 7), yr:today().slice(0, 4), sum:null, dirty:false, loading:true, qr:'', qrOpen:false, zoom:false, loadedCls:null };
 const cref = () => db.doc('classes/' + S.cls);
 const dref = () => db.doc(`classes/${S.cls}/days/${S.date}`);
 const hashCls = () => (location.hash.match(/c=(\w+)/) || [])[1];
@@ -79,21 +91,21 @@ const closing = () => S.bal + salesTotal() - (+S.day.spending || 0) - (+S.day.sa
 const left = (sid, bid) => { const e = S.stock[sid + '_' + bid]; return e ? e.made - (e.sold || 0) : 0; };
 
 auth.onAuthStateChanged(async u => {
-  S.user = u;
+  S.user = u; unflash();
   const hc = hashCls();
-  if (hc) {
-    S.mode = 's'; S.cls = hc;
-    if (!u) { try { await auth.signInAnonymously(); } catch (e) { S.err = e.message; render(); } return; }
-    await loadDay();
-  } else if (u && !u.isAnonymous) {
-    S.mode = 't'; await loadClasses();
-  }
-  render();
+  try {
+    if (hc) { S.mode = 's'; S.cls = hc; await loadDay(); }   // students need no sign-in at all
+    else if (u && !u.isAnonymous) { S.mode = 't'; await loadClasses(); }
+    else { S.cls = null; S.classes = []; }
+  } catch (e) { S.err = e.message; }
+  S.loading = false; render();
 });
+addEventListener('beforeunload', e => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
 
 async function login() {
+  flash('Signing in…', 'busy', 0);
   try { await auth.signInWithEmailAndPassword($('em').value, $('pw').value); }
-  catch (e) { S.err = 'Cannot sign in. Check email and password.'; render(); }
+  catch (e) { S.err = 'Cannot sign in. Check email and password.'; flash(S.err, 'bad', 5000); render(); }
 }
 async function loadClasses() {
   const q = await db.collection('classes').where('teacherUid', '==', S.user.uid).get();
@@ -105,12 +117,13 @@ async function loadDay() {
   if (!S.cls) return;
   const d = dref();
   try {
-    const [cs, st, ds, ss, sl] = await Promise.all([cref().get(), cref().collection('students').get(), d.get(),
+    const lc = S.loadedCls === S.cls;
+    const [cs, st, ds, ss, sl] = await Promise.all([lc ? null : cref().get(), cref().collection('students').get(), d.get(),
       d.collection('stock').get(), d.collection('sales').orderBy('ts', 'desc').get()]);
-    S.clsName = cs.exists ? cs.data().name : '';
+    if (cs) { S.clsName = cs.exists ? cs.data().name : ''; S.qr = cs.exists ? cs.data().qr || '' : ''; S.loadedCls = S.cls; }
     S.studs = st.docs.map(x => ({ id:x.id, ...x.data() })).sort((a, b) => a.name.localeCompare(b.name));
     S.day = ds.exists ? ds.data() : { breads:[], spending:0, salary:0, locked:false };
-    S.day.breads = S.day.breads || [];
+    S.day.breads = S.day.breads || []; S.dirty = false;
     S.stock = {}; ss.docs.forEach(x => S.stock[x.id] = x.data());
     S.sales = sl.docs.map(x => ({ id:x.id, ...x.data() }));
     if (S.mode === 't') await loadBal();
@@ -128,23 +141,46 @@ async function loadBal() {
 async function persist() {
   await dref().set({ ...S.day, date:S.date, balance:S.bal, sales:salesTotal(), closing:closing() }, { merge:true });
 }
-const go = async f => { try { S.err = ''; await f(); } catch (e) { S.err = e.message; } render(); };
+let toastT, busyT;
+function flash(msg, kind = 'ok', ms = 3200) {
+  const e = $('toast'); if (!e) return;
+  clearTimeout(toastT); e.textContent = msg; e.className = 'show ' + kind;
+  if (ms) toastT = setTimeout(() => { e.className = ''; }, ms);
+}
+const unflash = () => { const e = $('toast'); if (e && e.className.includes('busy')) e.className = ''; };
+const dirty = () => { S.dirty = true; const e = $('dirty'); if (e) e.hidden = false; };
+const guard = () => !S.dirty || confirm('You have unsaved changes. Discard them?');
+const copyLink = async l => {
+  try { await navigator.clipboard.writeText(l); flash('Link copied'); }
+  catch (e) { flash('Could not copy. Select the link and copy it by hand.', 'bad', 5000); }
+};
+// f may return false to say nothing happened (cancelled), so no success message is shown.
+const go = async (f, ok) => {
+  clearTimeout(busyT); busyT = setTimeout(() => flash('Working…', 'busy', 0), 400);
+  let r;
+  try { S.err = ''; r = await f(); } catch (e) { S.err = e.message; }
+  clearTimeout(busyT); unflash();
+  if (S.err) flash(S.err, 'bad', 5000); else if (ok && r !== false) flash(typeof ok === 'function' ? ok() : ok);
+  render();
+};
 
 /* ---------- teacher actions ---------- */
 const addClass = () => go(async () => {
-  const name = prompt('Class name?'); if (!name) return;
+  if (!guard()) return false;
+  const name = prompt('Class name?'); if (!name) return false;
   const r = await db.collection('classes').add({ name, teacherUid:S.user.uid });
-  S.cls = r.id; await loadClasses();
-});
+  S.cls = r.id; S.draft = {}; S.sum = null; await loadClasses();
+}, 'Class added');
 const addStudent = () => go(async () => {
-  const name = prompt('Student name?'); if (!name) return;
+  if (!guard()) return false;
+  const name = prompt('Student name?'); if (!name) return false;
   await cref().collection('students').add({ name: name.trim() }); await loadDay();
-});
-const pickClass = id => go(async () => { S.cls = id; S.draft = {}; S.sum = null; await loadDay(); });
-const setDate = d => go(async () => { S.date = d || today(); S.draft = {}; await loadDay(); });
+}, 'Student added');
+const pickClass = id => { if (!guard()) return render(); go(async () => { S.dirty = false; S.cls = id; S.draft = {}; S.sum = null; await loadDay(); }); };
+const setDate = d => { if (!guard()) return render(); go(async () => { S.dirty = false; S.date = d || today(); S.draft = {}; await loadDay(); }); };
 const tab = t => { S.tab = t; render(); };
-const addBread = () => { S.day.breads.push({ id:'b' + Date.now().toString(36), name:'', price:0 }); render(); };
-const delBread = i => { S.day.breads.splice(i, 1); render(); };
+const addBread = () => { S.day.breads.push({ id:'b' + Date.now().toString(36), name:'', price:0 }); S.dirty = true; render(); };
+const delBread = i => { S.day.breads.splice(i, 1); S.dirty = true; render(); };
 const saveBread = () => go(async () => {
   S.day.breads = S.day.breads.filter(b => b.name.trim());
   const batch = db.batch();
@@ -155,22 +191,22 @@ const saveBread = () => go(async () => {
     batch.set(dref().collection('stock').doc(k), { studentId:s.id, breadId:b.id, made, sold:old.sold || 0 });
   }
   await batch.commit(); S.draft = {}; await persist(); await loadDay();
-});
+}, 'Bread and quantities saved');
 const saveCosts = () => go(async () => {
   S.day.spending = +$('sp').value || 0; S.day.salary = +$('sa').value || 0;
-  S.day.title = $('ti').value.trim(); S.day.remarks = $('rm').value.trim(); await persist();
-});
-const toggleLock = () => go(async () => { S.day.locked = !S.day.locked; await persist(); });
+  S.day.title = $('ti').value.trim(); S.day.remarks = $('rm').value.trim(); await persist(); S.dirty = false;
+}, 'Report saved');
+const toggleLock = () => go(async () => { S.day.locked = !S.day.locked; await persist(); }, () => S.day.locked ? 'Day locked. No more changes.' : 'Day unlocked');
 const delSale = id => go(async () => {
   const s = S.sales.find(x => x.id === id);
-  if (S.day.locked || !confirm('Remove this sale?')) return;
+  if (S.day.locked || !confirm('Remove this sale?')) return false;
   await db.runTransaction(async t => {
     const r = dref().collection('stock').doc(s.studentId + '_' + s.breadId), d = await t.get(r);
     t.update(r, { sold: Math.max(0, (d.data().sold || 0) - s.qty) });
     t.delete(dref().collection('sales').doc(id));
   });
   await loadDay(); await persist();
-});
+}, 'Sale removed');
 
 /* ---------- monthly / yearly ---------- */
 const fmt = d => d.split('-').reverse().join('/');
@@ -191,7 +227,7 @@ const loadSummary = kind => go(async () => {
     return r;
   }));
   S.sum = { kind, rows, P };
-});
+}, () => S.sum.rows.length ? 'Report ready' : 'No sales found for this period');
 function sumView(kind) {
   const m = kind === 'm', v = S.sum && S.sum.kind === kind ? S.sum : null;
   let h = `<div class="card noprint row" style="align-items:end"><div style="flex:1"><label>${m ? 'Month' : 'Year'}</label>` +
@@ -215,18 +251,18 @@ function sumView(kind) {
     `<tr><td><b>Total</b></td>${m ? '' : `<td class="r">${v.rows.length}</td>`}<td class="r">${T('qty')}</td><td class="r">${money(T('sales'))}</td><td class="r">${money(T('cash'))}</td><td class="r">${money(T('qr'))}</td><td class="r">${money(T('spending'))}</td><td class="r">${money(T('salary'))}</td>${m ? '<td></td>' : ''}</tr></table></div>
   <div class="card scroll"><h2>By student</h2><table><tr><th>Student</th><th class="r">Made</th><th class="r">Sold</th><th class="r">Money</th></tr>` +
     Object.values(v.P).sort((a, b) => a.name.localeCompare(b.name)).map(p => `<tr><td>${esc(p.name)}</td><td class="r">${p.made}</td><td class="r">${p.sold}</td><td class="r">${money(p.money)}</td></tr>`).join('') +
-    `</table></div><p class="noprint row"><button class="go" style="flex:2" onclick="exportSum()">Export to Excel</button><button style="flex:1" onclick="window.print()">Print report</button></p>`;
+    `</table></div><p class="noprint"><button class="go" onclick="exportSum()">Export</button></p>`;
 }
 function reportView(dis, L) {
   const es = Object.values(S.stock), of = id => es.filter(e => e.studentId === id), bn = id => (S.day.breads.find(b => b.id === id) || {}).name || '';
   const pres = S.studs.filter(s => of(s.id).some(e => e.made > 0)), abs = S.studs.filter(s => !pres.includes(s));
   const cash = S.sales.filter(x => x.pay !== 'qr').reduce((a, x) => a + x.amount, 0), qr = S.sales.filter(x => x.pay === 'qr').reduce((a, x) => a + x.amount, 0);
   const sales = salesTotal(), sold = es.reduce((a, e) => a + (e.sold || 0), 0), R = (a, b) => `<tr><td>${a}</td><td class="r">${b}</td></tr>`;
-  return `<div class="card"><input id="ti" placeholder="Sale title, e.g. Pizza sale no. 5" value="${esc(S.day.title || '')}" ${dis}>
+  return `<div class="card"><input id="ti" placeholder="Sale title, e.g. Pizza sale no. 5" value="${esc(S.day.title || '')}" onchange="S.day.title=this.value.trim();dirty()" ${dis}>
   <p class="mute">Date: ${fmt(S.date)} · ${esc(S.clsName)}</p><table>` +
     R('Balance brought forward', money(S.bal)) + R('Total money received (sales)', money(sales)) + R('Total money now', money(S.bal + sales)) +
-    R('Spending (raw cost)', `<input id="sp" type="number" step="0.01" min="0" value="${S.day.spending || ''}" ${dis}>`) +
-    R('Salary paid', `<input id="sa" type="number" step="0.01" min="0" value="${S.day.salary || ''}" ${dis}>`) +
+    R('Spending (raw cost)', `<input id="sp" type="number" step="0.01" min="0" value="${S.day.spending || ''}" onchange="S.day.spending=+this.value||0;dirty()" ${dis}>`) +
+    R('Salary paid', `<input id="sa" type="number" step="0.01" min="0" value="${S.day.salary || ''}" onchange="S.day.salary=+this.value||0;dirty()" ${dis}>`) +
     `<tr><td><b>Current balance</b></td><td class="r big">${money(closing())}</td></tr></table></div>
   <div class="card"><h2>Attendance</h2><p>Present: ${pres.length} · Absent: ${abs.length}</p>${abs.length ? `<p>Absent: ${abs.map(s => esc(s.name)).join(', ')}</p>` : ''}
   <p class="mute">A student counts as present when they were given buns to sell.</p></div>
@@ -234,10 +270,10 @@ function reportView(dis, L) {
     pres.map(s => { const e = of(s.id); return `<tr><td>${esc(s.name)}</td><td>${e.filter(x => x.made > 0).map(x => x.made + ' ' + esc(bn(x.breadId))).join(', ')}</td><td class="r">${e.reduce((a, x) => a + (x.sold || 0), 0)}</td><td class="r">${money(e.reduce((a, x) => a + (x.sold || 0) * price(x.breadId), 0))}</td></tr>`; }).join('') +
     `<tr><td><b>Total</b></td><td></td><td class="r">${sold}</td><td class="r">${money(sales)}</td></tr></table></div>
   <div class="card"><h2>Summary</h2><table>` + R('Cash received', money(cash)) + R('QR received', money(qr)) +
-    `</table><label>Remarks for the day</label><textarea id="rm" rows="4" placeholder="e.g. Everyone sold out except Asmat." ${dis}>${esc(S.day.remarks || '')}</textarea></div>
+    `</table><label>Remarks for the day</label><textarea id="rm" rows="4" placeholder="e.g. Everyone sold out except Asmat." onchange="S.day.remarks=this.value.trim();dirty()" ${dis}>${esc(S.day.remarks || '')}</textarea></div>
+  <p id="dirty" class="bad noprint" ${S.dirty ? '' : 'hidden'}>You have unsaved changes. Press Save report.</p>
   <p class="row noprint"><button class="go" style="flex:2" onclick="saveCosts()" ${dis}>Save report</button>
-  <button style="flex:1" onclick="toggleLock()">${L ? 'Unlock day' : 'Lock day'}</button><button style="flex:1" onclick="window.print()">Print</button></p>
-  <p class="noprint"><button class="go" onclick="exportDay()">Export to Excel</button></p>`;
+  <button style="flex:1" onclick="toggleLock()">${L ? 'Unlock day' : 'Lock day'}</button><button style="flex:1" onclick="exportDay()">Export</button></p>`;
 }
 
 /* ---------- excel export ---------- */
@@ -302,7 +338,7 @@ const exportDay = () => go(async () => {
   const ws = wb.addWorksheet('Sales list'); ws.columns = widths([30.9, 24.9, 24.9, 12.9, 12.9, 12.9]);
   salesBlock(ws, 1, S.date, S.sales);
   await saveWb(wb, `daily-report-${S.date}.xlsx`);
-});
+}, 'Excel file downloaded');
 const exportSum = () => go(async () => {
   const v = S.sum; if (!v) throw Error('Press Show report first.');
   const m = v.kind === 'm', G = {}, wb = newWb();
@@ -332,7 +368,39 @@ const exportSum = () => go(async () => {
     let n = 1; v.rows.forEach(r => { n = salesBlock(sw, n, r.date, r.det.sales); });
   }
   await saveWb(wb, m ? `monthly-report-${S.mon}.xlsx` : `yearly-report-${S.yr}.xlsx`);
-});
+}, 'Excel file downloaded');
+
+/* ---------- payment QR code (one per class) ---------- */
+function shrink(file) {   // resize to keep the saved image small but still scannable
+  return new Promise((res, rej) => {
+    const img = new Image(), u = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(u);
+      for (const max of [800, 600, 450]) {
+        const k = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement('canvas');
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+        for (const type of ['image/png', 'image/jpeg']) { const d = c.toDataURL(type, 0.92); if (d.length < 700000) return res(d); }
+      }
+      rej(Error('That image is too large. Try a cropped picture of just the QR code.'));
+    };
+    img.onerror = () => rej(Error('Could not read that image.'));
+    img.src = u;
+  });
+}
+const uploadQr = inp => go(async () => {
+  const f = inp.files[0]; if (!f) return false;
+  if (!f.type.startsWith('image/')) throw Error('Please choose an image file.');
+  const url = await shrink(f);
+  await cref().update({ qr:url }); S.qr = url; S.qrOpen = true;
+}, 'QR code saved for this class');
+const removeQr = () => go(async () => {
+  if (!confirm('Remove the QR code for this class?')) return false;
+  await cref().update({ qr:'' }); S.qr = '';
+}, 'QR code removed');
+const qrBox = () => S.qr
+  ? `<div class="qrbox"><p class="mute">Show this to the buyer to scan. Tap the code to enlarge.</p><img src="${S.qr}" alt="Payment QR code" onclick="S.zoom=true;render()"></div>`
+  : `<p class="bad">No QR code has been added for this class yet. Ask your teacher.</p>`;
 
 /* ---------- student actions ---------- */
 const me = id => { S.me = S.studs.find(s => s.id === id); S.stab = 'sell'; S.qty = 1; S.msg = ''; render(); };
@@ -351,7 +419,8 @@ const record = () => go(async () => {
         buyer:S.buyer.trim(), qty:q, pay:S.pay, amount:q * b.price, ts:TS() });
     });
     S.qty = 1; S.buyer = ''; S.msg = 'Sale recorded.';
-  } catch (e) { S.msg = e.message; }
+    flash(`Sale recorded: ${q} × ${b.name}, ${money(q * b.price)}`);
+  } catch (e) { S.msg = e.message; flash(e.message, 'bad', 5000); }
   await loadDay();
 });
 
@@ -359,7 +428,11 @@ const record = () => go(async () => {
 const head = right => `<header><b>PPKI SMK Tansau</b>${right || ''}</header>`;
 function render() {
   const A = $('app');
-  if (S.mode === 's') { A.innerHTML = studentView(); return; }
+  if (S.loading) { A.innerHTML = head() + '<main><p class="mute">Loading…</p></main>'; return; }
+  if (S.mode === 's') {
+    A.innerHTML = studentView() + (S.zoom && S.qr ? `<div class="zoom" onclick="S.zoom=false;render()"><img src="${S.qr}" alt="Payment QR code"><p>Tap anywhere to close</p></div>` : '');
+    return;
+  }
   if (!S.user || S.user.isAnonymous) {
     A.innerHTML = head() + `<main><div class="card"><h2>Teacher sign in</h2><label>Email</label><input id="em" type="email">
     <label>Password</label><input id="pw" type="password"><p><button class="go" onclick="login()">Sign in</button></p>
@@ -389,7 +462,7 @@ function studentView() {
   <div class="card"><label>Buyer's name</label><input value="${esc(S.buyer)}" oninput="S.buyer=this.value" placeholder="e.g. Cikgu Aminah">
   <label>How many?</label><div class="qty"><button onclick="step(-1)" aria-label="Less">−</button><b>${q}</b><button onclick="step(1)" aria-label="More">+</button></div>
   <label>Payment</label><div class="pay"><button class="${S.pay === 'cash' ? 'on' : ''}" onclick="setPay('cash')">Cash</button>
-  <button class="${S.pay === 'qr' ? 'on' : ''}" onclick="setPay('qr')">QR</button></div>
+  <button class="${S.pay === 'qr' ? 'on' : ''}" onclick="setPay('qr')">QR</button></div>${S.pay === 'qr' ? qrBox() : ''}
   <div class="sum"><div class="mute">${q} × ${b ? esc(b.name) : ''} @ ${money(b && b.price)}</div><b>Total ${money(q * (b ? b.price : 0))}</b></div>
   <button class="go" onclick="record()" ${L || lf < 1 ? 'disabled' : ''}>${L ? 'Day is closed' : lf < 1 ? 'Sold out' : 'Record sale'}</button>
   <p class="${S.msg === 'Sale recorded.' ? 'ok' : 'bad'}">${esc(S.msg)}</p></div></main>`;
@@ -402,20 +475,27 @@ function teacherView() {
   <button onclick="addClass()">Add class</button><button onclick="addStudent()" ${S.cls ? '' : 'disabled'}>Add student</button></div>`;
   if (!S.cls) return h + '<div class="card">Add your first class to begin.</div></main>';
   h += `<div class="card noprint"><label>Student link (no sign in needed)</label><div class="row"><input style="flex:1;min-width:200px" readonly value="${esc(link)}" onclick="this.select()">
-  <button onclick="navigator.clipboard.writeText('${link}')">Copy</button><a class="btn" href="${esc(link)}" target="_blank" rel="noopener">Open student page</a></div></div>
+  <button onclick="copyLink('${link}')">Copy</button><a class="btn" href="${esc(link)}" target="_blank" rel="noopener">Open student page</a></div></div>
+  <details class="card noprint" ${S.qrOpen ? 'open' : ''} ontoggle="S.qrOpen=this.open"><summary><b>Payment QR code for ${esc(S.clsName)}</b> <span class="${S.qr ? 'ok' : 'mute'}">${S.qr ? 'Set' : 'Not set'}</span></summary>
+  <p class="mute">Students show this to buyers who pay by QR. Each class has its own.</p>
+  ${S.qr ? `<img src="${S.qr}" alt="QR code preview" style="max-width:220px;background:#fff;padding:8px;border-radius:8px;display:block">` : ''}
+  <label>${S.qr ? 'Replace QR code' : 'Upload QR code image'}</label><input type="file" accept="image/*" onchange="uploadQr(this)">
+  ${S.qr ? '<p><button onclick="removeQr()">Remove QR code</button></p>' : ''}</details>
   <p class="${L ? 'ok' : ''}">${L ? 'This day is locked.' : ''}<span class="bad"> ${esc(S.err)}</span></p>
   <nav class="noprint">${[['bread', 'Add bread'], ['sales', 'Sales today'], ['rep', 'Report'], ['mon', 'Monthly'], ['yr', 'Yearly']].map(t => `<button class="${S.tab === t[0] ? 'on' : ''}" onclick="tab('${t[0]}')">${t[1]}</button>`).join('')}</nav>`;
   const bs = S.day.breads;
   if (S.tab === 'bread') {
-    h += `<div class="card"><h2>Bread for ${S.date}</h2>` + bs.map((b, i) => `<div class="row" style="margin-bottom:8px">
-      <input style="flex:1" placeholder="Bread name" value="${esc(b.name)}" onchange="S.day.breads[${i}].name=this.value" ${dis}>
-      <input type="number" step="0.01" min="0" placeholder="RM" value="${b.price || ''}" onchange="S.day.breads[${i}].price=+this.value||0" ${dis}>
+    h += `<div class="card"><h2>Bread for ${fmt(S.date)}</h2>` + bs.map((b, i) => `<div class="row" style="margin-bottom:8px">
+      <input style="flex:1" placeholder="Bread name" value="${esc(b.name)}" onchange="S.day.breads[${i}].name=this.value;dirty()" ${dis}>
+      <input type="number" step="0.01" min="0" placeholder="RM" value="${b.price || ''}" onchange="S.day.breads[${i}].price=+this.value||0;dirty()" ${dis}>
       <button onclick="delBread(${i})" ${dis}>Remove</button></div>`).join('') +
-      `<button onclick="addBread()" ${dis}>Add bread type</button></div>
-    <div class="card scroll"><h2>Buns made per student</h2><table><tr><th>Student</th>${bs.map(b => `<th>${esc(b.name || '?')}</th>`).join('')}</tr>` +
-      S.studs.map(s => `<tr><td>${esc(s.name)}</td>` + bs.map(b => { const k = s.id + '_' + b.id;
-        return `<td><input type="number" min="0" value="${k in S.draft ? S.draft[k] : (S.stock[k] || {}).made || 0}" onchange="S.draft['${k}']=this.value" ${dis}></td>`; }).join('') + '</tr>').join('') +
-      `</table><p><button class="go" onclick="saveBread()" ${dis}>Save bread and quantities</button></p></div>`;
+      `<button onclick="addBread()" ${dis}>Add bread type</button></div>` +
+      (bs.length ? `<div class="card scroll"><h2>Buns made per student</h2><table><tr><th>Student</th>${bs.map(b => `<th>${esc(b.name || 'Bread')}</th>`).join('')}</tr>` +
+        S.studs.map(s => `<tr><td>${esc(s.name)}</td>` + bs.map(b => { const k = s.id + '_' + b.id;
+          return `<td><input type="number" min="0" value="${k in S.draft ? S.draft[k] : (S.stock[k] || {}).made || 0}" onchange="S.draft['${k}']=this.value;dirty()" ${dis}></td>`; }).join('') + '</tr>').join('') +
+        `</table></div>` : `<p class="mute">Add a bread type above, then you can enter how many each student made.</p>`) +
+      (bs.length || S.dirty ? `<p id="dirty" class="bad" ${S.dirty ? '' : 'hidden'}>You have unsaved changes. Press Save below.</p>
+      <button class="go" onclick="saveBread()" ${dis}>${bs.length ? 'Save bread and quantities' : 'Save changes'}</button>` : '');
   } else if (S.tab === 'sales') {
     const t = p => S.sales.filter(x => x.pay === p).reduce((a, x) => a + x.amount, 0);
     h += `<div class="card scroll"><table><tr><th>Student</th><th class="r">Made</th><th class="r">Sold</th><th class="r">Left</th><th class="r">Money</th></tr>` +
