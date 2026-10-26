@@ -69,6 +69,7 @@ textarea{resize:vertical}
 @media (prefers-reduced-motion:reduce){.sw .tr,.sw .tr::after{transition:none}}
 summary{cursor:pointer;padding:2px 0}
 input[type=file]{padding:10px}
+input.invalid{border-color:var(--bad);box-shadow:0 0 0 1px var(--bad)}
 input[type=date],input[type=month]{color-scheme:dark}
 input[type=date]::-webkit-calendar-picker-indicator,input[type=month]::-webkit-calendar-picker-indicator{cursor:pointer;opacity:1;padding:4px}
 .qrbox{text-align:center;margin:12px 0}
@@ -90,7 +91,7 @@ input[type=date]::-webkit-calendar-picker-indicator,input[type=month]::-webkit-c
 <script>
 // PASTE YOUR FIREBASE WEB CONFIG HERE (Project settings > Your apps > Web)
 const CFG = 
-{ 
+{
   apiKey: "AIzaSyAVwHXRUZkkSaYBSqjgUoQNIZHINdU-m3U",
   authDomain: "ppkismktbakery.firebaseapp.com",
   projectId: "ppkismktbakery",
@@ -98,7 +99,7 @@ const CFG =
   messagingSenderId: "571186338171",
   appId: "1:571186338171:web:b345306a0397e11d6685de",
   measurementId: "G-V75M1CW1KM"
- };
+};
 firebase.initializeApp(CFG);
 const auth = firebase.auth(), db = firebase.firestore(), $ = id => document.getElementById(id);
 db.settings({ experimentalAutoDetectLongPolling:true, merge:true });
@@ -107,7 +108,7 @@ const today = () => new Date().toLocaleDateString('en-CA');
 const money = n => 'RM' + (+n || 0).toFixed(2);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const S = { mode:'t', user:null, classes:[], cls:null, clsName:'', date:today(), day:{breads:[]}, studs:[], stock:{}, sales:[], bal:0,
-  tab:'bread', stab:'sell', me:null, pick:null, qty:1, pay:'cash', buyer:'', msg:'', err:'', draft:{}, mon:today().slice(0, 7), yr:today().slice(0, 4), sum:null, dirty:false, loading:true, qr:'', qrOpen:false, zoom:false, loadedCls:null, slow:false, stick:false };
+  tab:'bread', stab:'sell', me:null, pick:null, qty:1, pay:'cash', buyer:'', msg:'', err:'', draft:{}, mon:today().slice(0, 7), yr:today().slice(0, 4), sum:null, dirty:false, loading:true, qr:'', qrOpen:false, zoom:false, loadedCls:null, slow:false, stick:false, buyerErr:false };
 const cref = () => db.doc('classes/' + S.cls);
 const dref = () => db.doc(`classes/${S.cls}/days/${S.date}`);
 const hashCls = () => (location.hash.match(/c=(\w+)/) || [])[1];
@@ -487,7 +488,7 @@ const qrBox = () => S.qr
   : `<p class="bad">No QR code has been added for this class yet. Ask your teacher.</p>`;
 
 /* ---------- student actions ---------- */
-const me = id => { S.me = S.studs.find(s => s.id === id); S.stab = 'sell'; S.qty = 1; S.msg = ''; S.sales = []; render(); loadMine(); };
+const me = id => { S.me = S.studs.find(s => s.id === id); S.stab = 'sell'; S.qty = 1; S.msg = ''; S.buyerErr = false; S.sales = []; render(); loadMine(); };
 const loadMine = async () => {
   const id = S.me.id;
   try {
@@ -496,11 +497,19 @@ const loadMine = async () => {
     S.sales = q.docs.map(x => ({ id:x.id, ...x.data() })).sort((p, q2) => tsv(q2) - tsv(p)); render();
   } catch (e) { flash(e.message, 'bad', 5000); }
 };
-const notMe = () => { S.me = null; S.msg = ''; render(); };
+const notMe = () => { S.me = null; S.msg = ''; S.buyerErr = false; render(); };
 const pickBread = id => { S.pick = id; S.qty = 1; render(); };
 const step = n => { const m = left(S.me.id, S.pick); S.qty = Math.min(Math.max(1, S.qty + n), Math.max(1, m)); render(); };
 const setPay = p => { S.pay = p; render(); };
-const record = () => go(async () => {
+const record = () => {
+  if (!S.buyer.trim()) {   // the buyer's name is required
+    S.buyerErr = true; S.msg = ''; render(); flash("Please enter the buyer's name.", 'bad', 4000);
+    const e = $('buyer'); if (e) e.focus();
+    return Promise.resolve();
+  }
+  S.buyerErr = false; return saveSale();
+};
+const saveSale = () => go(async () => {
   const b = S.day.breads.find(x => x.id === S.pick), k = S.me.id + '_' + b.id, q = S.qty, sref = dref().collection('sales').doc();
   const rec = { studentId:S.me.id, studentName:S.me.name, breadId:b.id, bread:b.name, buyer:S.buyer.trim(), qty:q, pay:S.pay, amount:q * b.price };
   try {
@@ -556,7 +565,9 @@ function studentView() {
   const b = S.day.breads.find(x => x.id === S.pick), lf = b ? left(S.me.id, b.id) : 0, q = Math.min(S.qty, Math.max(1, lf));
   return h + nav + `<main><div class="tiles">` + S.day.breads.map(x => `<button class="tile ${x.id === S.pick ? 'on' : ''}" onclick="pickBread('${x.id}')">
     <b>${esc(x.name)}</b><small>${money(x.price)} each</small><em>${left(S.me.id, x.id)}</em><small>left</small></button>`).join('') + `</div>
-  <div class="card"><label>Buyer's name</label><input value="${esc(S.buyer)}" oninput="S.buyer=this.value" placeholder="e.g. Cikgu Aminah">
+  <div class="card"><label for="buyer">Buyer's name</label><input id="buyer" class="${S.buyerErr ? 'invalid' : ''}" maxlength="60" value="${esc(S.buyer)}" placeholder="e.g. Cikgu Aminah" aria-describedby="berr" ${S.buyerErr ? 'aria-invalid="true"' : ''}
+  oninput="S.buyer=this.value;S.buyerErr=false;this.classList.remove('invalid');this.removeAttribute('aria-invalid');$('berr').hidden=true">
+  <p id="berr" class="bad" ${S.buyerErr ? '' : 'hidden'}>Please enter the buyer's name.</p>
   <label>How many?</label><div class="qty"><button onclick="step(-1)" aria-label="Less">−</button><b>${q}</b><button onclick="step(1)" aria-label="More">+</button></div>
   <label>Payment</label><div class="pay"><button class="${S.pay === 'cash' ? 'on' : ''}" onclick="setPay('cash')">Cash</button>
   <button class="${S.pay === 'qr' ? 'on' : ''}" onclick="setPay('qr')">QR</button></div>${S.pay === 'qr' ? qrBox() : ''}
