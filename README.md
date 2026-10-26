@@ -71,6 +71,12 @@ The app has no sign-up screen, so only accounts you create can sign in. In **Aut
 5. During the day, check the **Sales today** tab for each student's made, sold and left, and the cash and QR totals. A wrongly recorded sale can be removed there, and the buns go back to that student's stock.
 6. At the end of the day, open the **Report** tab, type the **spending**, **salary paid** and any **remarks**, and click **Save report**. Click **Lock day** when you are done.
 
+### Live updates
+
+The teacher page updates by itself. When a student records a sale, a message pops up (for example "Eric sold 2 × Pizza (RM6.00)") and the **Sales today** and **Report** tabs refresh without reloading. A line under the tabs shows **● Live** and the time of the last update.
+- The page never redraws while you are typing in a box, so nothing you type is lost. It refreshes as soon as you leave the box.
+- Monthly and Yearly reports are not live. Press **Show report** to refresh them.
+
 ### Stay on the same student
 
 Under the student link there is a switch called **Stay on the same student**, set per class.

@@ -110,7 +110,7 @@ const today = () => new Date().toLocaleDateString('en-CA');
 const money = n => 'RM' + (+n || 0).toFixed(2);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const S = { mode:'t', user:null, classes:[], cls:null, clsName:'', date:today(), day:{breads:[]}, studs:[], stock:{}, sales:[], bal:0,
-  tab:'bread', stab:'sell', me:null, pick:null, qty:1, pay:'cash', buyer:'', msg:'', err:'', draft:{}, mon:today().slice(0, 7), yr:today().slice(0, 4), sum:null, dirty:false, loading:true, qr:'', qrOpen:false, zoom:false, loadedCls:null, slow:false, stick:false, buyerErr:false };
+  tab:'bread', stab:'sell', me:null, pick:null, qty:1, pay:'cash', buyer:'', msg:'', err:'', draft:{}, mon:today().slice(0, 7), yr:today().slice(0, 4), sum:null, dirty:false, loading:true, qr:'', qrOpen:false, zoom:false, loadedCls:null, slow:false, stick:false, buyerErr:false, live:'', lastAt:null };
 const cref = () => db.doc('classes/' + S.cls);
 const dref = () => db.doc(`classes/${S.cls}/days/${S.date}`);
 const hashCls = () => (location.hash.match(/c=(\w+)/) || [])[1];
@@ -126,7 +126,7 @@ auth.onAuthStateChanged(async u => {
   if (hc0) { render(); return; }   // the student page never waits for sign-in
   try {
     if (u && !u.isAnonymous) { S.mode = 't'; await loadClasses(); }
-    else { S.cls = null; S.classes = []; }
+    else { S.cls = null; S.classes = []; unwatch(); }
   } catch (e) { S.err = e.message; }
   S.loading = false; render();
 });
@@ -162,6 +162,7 @@ async function loadDay() {
     if (S.mode === 't') await loadBal();
     if (!S.day.breads.find(b => b.id === S.pick)) S.pick = (S.day.breads[0] || {}).id;
   } catch (e) { S.err = e.message; }
+  if (S.mode === 't') watch();
 }
 async function loadBal() {
   const pv = await db.collection(`classes/${S.cls}/days`).where('date', '<', S.date).orderBy('date', 'desc').limit(1).get();
@@ -240,6 +241,44 @@ const delSale = id => go(async () => {
   });
   await loadDay(); await persist();
 }, 'Sale removed');
+
+/* ---------- live updates for the teacher page ---------- */
+let unsubs = [], watchKey = '', staleUI = false;
+const sig = o => JSON.stringify(o, (k, v) => v && typeof v.toMillis === 'function' ? v.toMillis() : v);
+const liveText = () => S.live === 'on' ? '● Live' + (S.lastAt ? '. Last update ' + S.lastAt.toLocaleTimeString() : '') :
+  S.live === 'wait' ? '● Reconnecting… showing the last saved data' : S.live === 'err' ? '● Live updates stopped. Reload the page.' : '';
+const liveLabel = () => { const e = $('live'); if (e) e.textContent = liveText(); };
+function unwatch() { unsubs.forEach(f => f()); unsubs = []; watchKey = ''; S.live = ''; staleUI = false; }
+// Redraw now, unless the teacher is typing in a box (that would wipe what they typed). Then wait until they leave it.
+function refresh() {
+  const a = document.activeElement;
+  if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && $('app').contains(a)) { staleUI = true; return; }
+  staleUI = false; render();
+}
+addEventListener('focusout', () => setTimeout(() => { if (staleUI) refresh(); }, 50));
+function watch() {
+  if (S.mode !== 't' || !S.cls || !S.user || S.user.isAnonymous) return unwatch();
+  const key = S.cls + '|' + S.date; if (key === watchKey) return;
+  unwatch(); watchKey = key;
+  const d = dref(), seen = {};
+  const fail = e => { S.live = 'err'; liveLabel(); flash('Live updates stopped: ' + e.message, 'bad', 5000); };
+  const upd = (snap, kind) => {
+    const stock = kind === 'stock', first = !seen[kind];
+    const next = stock ? Object.fromEntries(snap.docs.map(x => [x.id, x.data()])) : snap.docs.map(x => ({ id:x.id, ...x.data() }));
+    const changed = sig(next) !== sig(stock ? S.stock : S.sales);
+    if (!stock && !first) snap.docChanges().forEach(c => {
+      if (c.type === 'added' && !c.doc.metadata.hasPendingWrites) { const s = c.doc.data(); flash(`${s.studentName} sold ${s.qty} × ${s.bread} (${money(s.amount)})`); }
+    });
+    seen[kind] = true;
+    if (stock) S.stock = next; else S.sales = next;
+    S.live = snap.metadata.fromCache ? 'wait' : 'on';
+    if (changed || first) S.lastAt = new Date();
+    liveLabel();
+    if (changed && ['sales', 'rep'].includes(S.tab)) refresh();
+  };
+  unsubs = [d.collection('stock').onSnapshot(s => upd(s, 'stock'), fail),
+    d.collection('sales').orderBy('ts', 'desc').onSnapshot(s => upd(s, 'sales'), fail)];
+}
 
 /* ---------- monthly / yearly ---------- */
 const fmt = d => d.split('-').reverse().join('/');
@@ -594,7 +633,8 @@ function teacherView() {
   <label>${S.qr ? 'Replace QR code' : 'Upload QR code image'}</label><input type="file" accept="image/*" onchange="uploadQr(this)">
   ${S.qr ? '<p><button onclick="removeQr()">Remove QR code</button></p>' : ''}</details>
   <p class="${L ? 'ok' : ''}">${L ? 'This day is locked.' : ''}<span class="bad"> ${esc(S.err)}</span></p>
-  <nav class="noprint">${[['bread', 'Add bread'], ['sales', 'Sales today'], ['rep', 'Report'], ['mon', 'Monthly'], ['yr', 'Yearly']].map(t => `<button class="${S.tab === t[0] ? 'on' : ''}" onclick="tab('${t[0]}')">${t[1]}</button>`).join('')}</nav>`;
+  <nav class="noprint">${[['bread', 'Add bread'], ['sales', 'Sales today'], ['rep', 'Report'], ['mon', 'Monthly'], ['yr', 'Yearly']].map(t => `<button class="${S.tab === t[0] ? 'on' : ''}" onclick="tab('${t[0]}')">${t[1]}</button>`).join('')}</nav>
+  <p id="live" class="mute noprint" role="status">${liveText()}</p>`;
   const bs = S.day.breads;
   if (S.tab === 'bread') {
     h += `<div class="card"><h2>Bread for ${fmt(S.date)}</h2>` + bs.map((b, i) => `<div class="row" style="margin-bottom:8px">
