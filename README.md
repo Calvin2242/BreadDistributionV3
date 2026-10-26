@@ -71,6 +71,14 @@ The app has no sign-up screen, so only accounts you create can sign in. In **Aut
 5. During the day, check the **Sales today** tab for each student's made, sold and left, and the cash and QR totals. A wrongly recorded sale can be removed there, and the buns go back to that student's stock.
 6. At the end of the day, open the **Report** tab, type the **spending**, **salary paid** and any **remarks**, and click **Save report**. Click **Lock day** when you are done.
 
+### Stay on the same student
+
+Under the student link there is a switch called **Stay on the same student**, set per class.
+- **Off (default):** after each recorded sale the student page goes back to **Who are you?**.
+- **On:** the page stays on that student's selling screen. They tap **Not you?** to switch.
+
+Student devices that are already open need a page refresh to pick up a changed setting.
+
 ### Payment QR code
 
 1. In the teacher view, open **Payment QR code** under the student link.
@@ -84,7 +92,7 @@ If you change the QR code, student devices that are already open need a page ref
 
 1. Open the class link.
 2. Tap your name.
-3. Pick the bread, type the buyer's name, set how many, choose **Cash** or **QR**, and press **Record sale**.
+3. Pick the bread, type the buyer's name, set how many, choose **Cash** or **QR**, and press **Record sale**. The page then returns to **Who are you?** so the next student can tap their name (unless the teacher turned on **Stay on the same student**).
 4. Open **My sales** to see your own cash, QR and total.
 5. If someone else is using the device, tap **Not you?** to switch.
 

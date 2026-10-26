@@ -59,6 +59,14 @@ textarea{resize:vertical}
 #cbox i.ne{right:0;top:0;cursor:nesw-resize}#cbox i.ne::after{right:3px;top:3px;border-width:4px 4px 0 0}
 #cbox i.sw{left:0;bottom:0;cursor:nesw-resize}#cbox i.sw::after{left:3px;bottom:3px;border-width:0 0 4px 4px}
 #cbox i.se{right:0;bottom:0;cursor:nwse-resize}#cbox i.se::after{right:3px;bottom:3px;border-width:0 4px 4px 0}
+.sw{display:flex;align-items:center;gap:12px;margin-top:14px;cursor:pointer}
+.sw input{position:absolute;opacity:0;width:1px;height:1px;padding:0;border:0}
+.sw .tr{width:52px;height:30px;border-radius:15px;background:var(--line);position:relative;flex:none;transition:background .2s}
+.sw .tr::after{content:'';position:absolute;left:3px;top:3px;width:24px;height:24px;border-radius:50%;background:#fff;transition:transform .2s}
+.sw input:checked+.tr{background:var(--teal)}
+.sw input:checked+.tr::after{transform:translateX(22px)}
+.sw input:focus-visible+.tr{outline:3px solid var(--gold);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.sw .tr,.sw .tr::after{transition:none}}
 summary{cursor:pointer;padding:2px 0}
 input[type=file]{padding:10px}
 input[type=date],input[type=month]{color-scheme:dark}
@@ -81,13 +89,16 @@ input[type=date]::-webkit-calendar-picker-indicator,input[type=month]::-webkit-c
 <div id="cropper"></div>
 <script>
 // PASTE YOUR FIREBASE WEB CONFIG HERE (Project settings > Your apps > Web)
-const CFG = { apiKey: "AIzaSyAVwHXRUZkkSaYBSqjgUoQNIZHINdU-m3U",
+const CFG = 
+{ 
+  apiKey: "AIzaSyAVwHXRUZkkSaYBSqjgUoQNIZHINdU-m3U",
   authDomain: "ppkismktbakery.firebaseapp.com",
   projectId: "ppkismktbakery",
   storageBucket: "ppkismktbakery.firebasestorage.app",
   messagingSenderId: "571186338171",
   appId: "1:571186338171:web:b345306a0397e11d6685de",
-  measurementId: "G-V75M1CW1KM" };
+  measurementId: "G-V75M1CW1KM"
+ };
 firebase.initializeApp(CFG);
 const auth = firebase.auth(), db = firebase.firestore(), $ = id => document.getElementById(id);
 db.settings({ experimentalAutoDetectLongPolling:true, merge:true });
@@ -96,7 +107,7 @@ const today = () => new Date().toLocaleDateString('en-CA');
 const money = n => 'RM' + (+n || 0).toFixed(2);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const S = { mode:'t', user:null, classes:[], cls:null, clsName:'', date:today(), day:{breads:[]}, studs:[], stock:{}, sales:[], bal:0,
-  tab:'bread', stab:'sell', me:null, pick:null, qty:1, pay:'cash', buyer:'', msg:'', err:'', draft:{}, mon:today().slice(0, 7), yr:today().slice(0, 4), sum:null, dirty:false, loading:true, qr:'', qrOpen:false, zoom:false, loadedCls:null, slow:false };
+  tab:'bread', stab:'sell', me:null, pick:null, qty:1, pay:'cash', buyer:'', msg:'', err:'', draft:{}, mon:today().slice(0, 7), yr:today().slice(0, 4), sum:null, dirty:false, loading:true, qr:'', qrOpen:false, zoom:false, loadedCls:null, slow:false, stick:false };
 const cref = () => db.doc('classes/' + S.cls);
 const dref = () => db.doc(`classes/${S.cls}/days/${S.date}`);
 const hashCls = () => (location.hash.match(/c=(\w+)/) || [])[1];
@@ -139,7 +150,7 @@ async function loadDay() {
     const [cs, st, ds, ss, sl] = await Promise.all([lc ? null : cref().get(), cref().collection('students').get(), d.get(),
       d.collection('stock').get(),
       S.mode === 's' ? (S.me ? d.collection('sales').where('studentId', '==', S.me.id).get() : null) : d.collection('sales').orderBy('ts', 'desc').get()]);
-    if (cs) { S.clsName = cs.exists ? cs.data().name : ''; S.qr = cs.exists ? cs.data().qr || '' : ''; S.loadedCls = S.cls; }
+    if (cs) { S.clsName = cs.exists ? cs.data().name : ''; S.qr = cs.exists ? cs.data().qr || '' : ''; S.stick = cs.exists ? !!cs.data().stick : false; S.loadedCls = S.cls; }
     S.studs = st.docs.map(x => ({ id:x.id, ...x.data() })).sort((a, b) => a.name.localeCompare(b.name));
     S.day = ds.exists ? ds.data() : { breads:[], spending:0, salary:0, locked:false };
     S.day.breads = S.day.breads || []; S.dirty = false;
@@ -400,6 +411,9 @@ const exportSum = () => go(async () => {
   await saveWb(wb, m ? `monthly-report-${S.mon}.xlsx` : `yearly-report-${S.yr}.xlsx`);
 }, 'Excel file downloaded');
 
+const setStick = v => go(async () => { await cref().update({ stick:v }); S.stick = v; },
+  () => S.stick ? 'On: students stay on their own page after a sale' : 'Off: students return to "Who are you?" after a sale');
+
 /* ---------- payment QR code (one per class) ---------- */
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
 // New crop square after dragging: o = starting box {x,y,s}, c = 'move' or a corner, (dx,dy) = finger movement, dw/dh = picture size on screen.
@@ -499,6 +513,7 @@ const record = () => go(async () => {
     S.stock[k] = { ...S.stock[k], sold:((S.stock[k] || {}).sold || 0) + q };   // update the screen without re-downloading everything
     S.sales.unshift({ id:sref.id, ...rec, ts:{ seconds:Math.floor(Date.now() / 1000) } });
     S.qty = 1; S.buyer = ''; S.msg = 'Sale recorded.';
+    if (!S.stick) { S.me = null; S.stab = 'sell'; S.pay = 'cash'; }   // back to "Who are you?" for the next student
     flash(`Sale recorded: ${q} × ${b.name}, ${money(q * b.price)}`);
   } catch (e) { S.msg = e.message; flash(e.message, 'bad', 5000); await loadDay(); }   // resync if the sale was refused
 });
@@ -557,7 +572,9 @@ function teacherView() {
   <button onclick="addClass()">Add class</button><button onclick="addStudent()" ${S.cls ? '' : 'disabled'}>Add student</button></div>`;
   if (!S.cls) return h + '<div class="card">Add your first class to begin.</div></main>';
   h += `<div class="card noprint"><label>Student link (no sign in needed)</label><div class="row"><input style="flex:1;min-width:200px" readonly value="${esc(link)}" onclick="this.select()">
-  <button onclick="copyLink('${link}')">Copy</button><a class="btn" href="${esc(link)}" target="_blank" rel="noopener">Open student page</a></div></div>
+  <button onclick="copyLink('${link}')">Copy</button><a class="btn" href="${esc(link)}" target="_blank" rel="noopener">Open student page</a></div>
+  <label class="sw"><input type="checkbox" role="switch" ${S.stick ? 'checked' : ''} onchange="setStick(this.checked)"><span class="tr"></span>
+  <span><b>Stay on the same student</b><br><span class="mute">${S.stick ? 'On: the page stays on the student after each sale.' : 'Off: the page returns to "Who are you?" after each sale.'}</span></span></label></div>
   <details class="card noprint" ${S.qrOpen ? 'open' : ''} ontoggle="S.qrOpen=this.open"><summary><b>Payment QR code for ${esc(S.clsName)}</b> <span class="${S.qr ? 'ok' : 'mute'}">${S.qr ? 'Set' : 'Not set'}</span></summary>
   <p class="mute">Students show this to buyers who pay by QR. Each class has its own. After choosing a picture you can crop it to just the QR code.</p>
   ${S.qr ? `<img src="${S.qr}" alt="QR code preview" style="max-width:220px;background:#fff;padding:8px;border-radius:8px;display:block">` : ''}
