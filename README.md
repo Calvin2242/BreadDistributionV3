@@ -147,5 +147,6 @@ classes/{classId}                 name, teacherUid
 | Blank page or console error about config | The `CFG` values in `index.html` are empty or wrong |
 | Teacher cannot sign in | The account was not created in Authentication, or Email/Password is not enabled |
 | Student link shows an error or "Missing or insufficient permissions" | The updated `firestore.rules` were not published, or the link was copied incorrectly |
+| Page stays on "Loading…" (often on iPhones) | A weak connection, a private browsing tab, or the link opened inside another app such as WhatsApp. Open it in Safari or Chrome, then press **Try again** |
 | "Missing or insufficient permissions" | The rules were not published, or the teacher is signed in with a different account |
 | "The query requires an index" | Click the link in the console error to create it |

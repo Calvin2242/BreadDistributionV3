@@ -7,7 +7,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
 :root{--bg:#0f1629;--bar:#0a0f1e;--card:#172240;--line:#2a3a5e;--ink:#f1f4fb;--mute:#8d9bbd;--gold:#f0b235;--teal:#3cc3ab;--bad:#ff7b6b}
 *{box-sizing:border-box}
@@ -82,21 +81,16 @@ input[type=date]::-webkit-calendar-picker-indicator,input[type=month]::-webkit-c
 <div id="cropper"></div>
 <script>
 // PASTE YOUR FIREBASE WEB CONFIG HERE (Project settings > Your apps > Web)
-const CFG = { apiKey: "AIzaSyAVwHXRUZkkSaYBSqjgUoQNIZHINdU-m3U",
-  authDomain: "ppkismktbakery.firebaseapp.com",
-  projectId: "ppkismktbakery",
-  storageBucket: "ppkismktbakery.firebasestorage.app",
-  messagingSenderId: "571186338171",
-  appId: "1:571186338171:web:b345306a0397e11d6685de",
-  measurementId: "G-V75M1CW1KM" };
+const CFG = { apiKey:"", authDomain:"", projectId:"", appId:"" };
 firebase.initializeApp(CFG);
 const auth = firebase.auth(), db = firebase.firestore(), $ = id => document.getElementById(id);
+db.settings({ experimentalAutoDetectLongPolling:true, merge:true });
 const TS = () => firebase.firestore.FieldValue.serverTimestamp();
 const today = () => new Date().toLocaleDateString('en-CA');
 const money = n => 'RM' + (+n || 0).toFixed(2);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const S = { mode:'t', user:null, classes:[], cls:null, clsName:'', date:today(), day:{breads:[]}, studs:[], stock:{}, sales:[], bal:0,
-  tab:'bread', stab:'sell', me:null, pick:null, qty:1, pay:'cash', buyer:'', msg:'', err:'', draft:{}, mon:today().slice(0, 7), yr:today().slice(0, 4), sum:null, dirty:false, loading:true, qr:'', qrOpen:false, zoom:false, loadedCls:null };
+  tab:'bread', stab:'sell', me:null, pick:null, qty:1, pay:'cash', buyer:'', msg:'', err:'', draft:{}, mon:today().slice(0, 7), yr:today().slice(0, 4), sum:null, dirty:false, loading:true, qr:'', qrOpen:false, zoom:false, loadedCls:null, slow:false };
 const cref = () => db.doc('classes/' + S.cls);
 const dref = () => db.doc(`classes/${S.cls}/days/${S.date}`);
 const hashCls = () => (location.hash.match(/c=(\w+)/) || [])[1];
@@ -105,16 +99,19 @@ const salesTotal = () => Object.values(S.stock).reduce((a, e) => a + (e.sold || 
 const closing = () => S.bal + salesTotal() - (+S.day.spending || 0) - (+S.day.salary || 0);
 const left = (sid, bid) => { const e = S.stock[sid + '_' + bid]; return e ? e.made - (e.sold || 0) : 0; };
 
+const hc0 = hashCls();
+if (hc0) { S.mode = 's'; S.cls = hc0; }
 auth.onAuthStateChanged(async u => {
   S.user = u; unflash();
-  const hc = hashCls();
+  if (hc0) { render(); return; }   // the student page never waits for sign-in
   try {
-    if (hc) { S.mode = 's'; S.cls = hc; await loadDay(); }   // students need no sign-in at all
-    else if (u && !u.isAnonymous) { S.mode = 't'; await loadClasses(); }
+    if (u && !u.isAnonymous) { S.mode = 't'; await loadClasses(); }
     else { S.cls = null; S.classes = []; }
   } catch (e) { S.err = e.message; }
   S.loading = false; render();
 });
+if (hc0) (async () => { await loadDay(); S.loading = false; render(); })();
+setTimeout(() => { if (S.loading) { S.slow = true; render(); } }, 8000);
 addEventListener('beforeunload', e => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
 
 async function login() {
@@ -134,13 +131,14 @@ async function loadDay() {
   try {
     const lc = S.loadedCls === S.cls;
     const [cs, st, ds, ss, sl] = await Promise.all([lc ? null : cref().get(), cref().collection('students').get(), d.get(),
-      d.collection('stock').get(), d.collection('sales').orderBy('ts', 'desc').get()]);
+      d.collection('stock').get(),
+      S.mode === 's' ? (S.me ? d.collection('sales').where('studentId', '==', S.me.id).get() : null) : d.collection('sales').orderBy('ts', 'desc').get()]);
     if (cs) { S.clsName = cs.exists ? cs.data().name : ''; S.qr = cs.exists ? cs.data().qr || '' : ''; S.loadedCls = S.cls; }
     S.studs = st.docs.map(x => ({ id:x.id, ...x.data() })).sort((a, b) => a.name.localeCompare(b.name));
     S.day = ds.exists ? ds.data() : { breads:[], spending:0, salary:0, locked:false };
     S.day.breads = S.day.breads || []; S.dirty = false;
     S.stock = {}; ss.docs.forEach(x => S.stock[x.id] = x.data());
-    S.sales = sl.docs.map(x => ({ id:x.id, ...x.data() }));
+    S.sales = sl ? sl.docs.map(x => ({ id:x.id, ...x.data() })).sort((p, q) => tsv(q) - tsv(p)) : [];
     if (S.mode === 't') await loadBal();
     if (!S.day.breads.find(b => b.id === S.pick)) S.pick = (S.day.breads[0] || {}).id;
   } catch (e) { S.err = e.message; }
@@ -311,7 +309,18 @@ async function saveWb(wb, file) {
   a.href = URL.createObjectURL(new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
   a.download = file; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
-const newWb = () => { if (!window.ExcelJS) throw Error('Excel library did not load. Check the internet connection and refresh.'); return new ExcelJS.Workbook(); };
+let xlP;   // the Excel library is large, so it is only fetched the first time someone presses Export
+const newWb = async () => {
+  if (!window.ExcelJS) {
+    xlP = xlP || new Promise((res, rej) => {
+      const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'; s.onload = res;
+      s.onerror = () => { xlP = null; rej(Error('Excel library did not load. Check the internet connection and try again.')); };
+      document.head.appendChild(s);
+    });
+    await xlP;
+  }
+  return new ExcelJS.Workbook();
+};
 // One day's report sheet. d = { date, day, bal, sales[], stock[] }
 function dayBook(wb, name, d) {
   const ws = wb.addWorksheet(name), dy = d.day, br = id => (dy.breads || []).find(b => b.id === id) || {};
@@ -348,7 +357,7 @@ function salesBlock(ws, r, date, sales) {
   return r + sales.length + 3;
 }
 const exportDay = () => go(async () => {
-  const wb = newWb();
+  const wb = await newWb();
   dayBook(wb, 'Daily report', { date:S.date, day:S.day, bal:S.bal, sales:S.sales, stock:Object.values(S.stock) });
   const ws = wb.addWorksheet('Sales list'); ws.columns = widths([30.9, 24.9, 24.9, 12.9, 12.9, 12.9]);
   salesBlock(ws, 1, S.date, S.sales);
@@ -356,7 +365,7 @@ const exportDay = () => go(async () => {
 }, 'Excel file downloaded');
 const exportSum = () => go(async () => {
   const v = S.sum; if (!v) throw Error('Press Show report first.');
-  const m = v.kind === 'm', G = {}, wb = newWb();
+  const m = v.kind === 'm', G = {}, wb = await newWb();
   v.rows.forEach(r => {
     const k = m ? r.date : r.date.slice(0, 7), g = G[k] || (G[k] = { k, days:0, qty:0, sales:0, cash:0, qr:0, spending:0, salary:0, remarks:[] });
     g.days++; ['qty', 'sales', 'cash', 'qr', 'spending', 'salary'].forEach(f => g[f] += r[f]); if (r.remarks) g.remarks.push(r.remarks);
@@ -458,32 +467,44 @@ const qrBox = () => S.qr
   : `<p class="bad">No QR code has been added for this class yet. Ask your teacher.</p>`;
 
 /* ---------- student actions ---------- */
-const me = id => { S.me = S.studs.find(s => s.id === id); S.stab = 'sell'; S.qty = 1; S.msg = ''; render(); };
+const me = id => { S.me = S.studs.find(s => s.id === id); S.stab = 'sell'; S.qty = 1; S.msg = ''; S.sales = []; render(); loadMine(); };
+const loadMine = async () => {
+  const id = S.me.id;
+  try {
+    const q = await dref().collection('sales').where('studentId', '==', id).get();
+    if (!S.me || S.me.id !== id) return;
+    S.sales = q.docs.map(x => ({ id:x.id, ...x.data() })).sort((p, q2) => tsv(q2) - tsv(p)); render();
+  } catch (e) { flash(e.message, 'bad', 5000); }
+};
 const notMe = () => { S.me = null; S.msg = ''; render(); };
 const pickBread = id => { S.pick = id; S.qty = 1; render(); };
 const step = n => { const m = left(S.me.id, S.pick); S.qty = Math.min(Math.max(1, S.qty + n), Math.max(1, m)); render(); };
 const setPay = p => { S.pay = p; render(); };
 const record = () => go(async () => {
-  const b = S.day.breads.find(x => x.id === S.pick), k = S.me.id + '_' + b.id, q = S.qty;
+  const b = S.day.breads.find(x => x.id === S.pick), k = S.me.id + '_' + b.id, q = S.qty, sref = dref().collection('sales').doc();
+  const rec = { studentId:S.me.id, studentName:S.me.name, breadId:b.id, bread:b.name, buyer:S.buyer.trim(), qty:q, pay:S.pay, amount:q * b.price };
   try {
     await db.runTransaction(async t => {
       const r = dref().collection('stock').doc(k), d = await t.get(r), e = d.data() || { made:0, sold:0 };
       if ((e.sold || 0) + q > e.made) throw Error('Only ' + (e.made - (e.sold || 0)) + ' left');
       t.update(r, { sold:(e.sold || 0) + q });
-      t.set(dref().collection('sales').doc(), { studentId:S.me.id, studentName:S.me.name, breadId:b.id, bread:b.name,
-        buyer:S.buyer.trim(), qty:q, pay:S.pay, amount:q * b.price, ts:TS() });
+      t.set(sref, { ...rec, ts:TS() });
     });
+    S.stock[k] = { ...S.stock[k], sold:((S.stock[k] || {}).sold || 0) + q };   // update the screen without re-downloading everything
+    S.sales.unshift({ id:sref.id, ...rec, ts:{ seconds:Math.floor(Date.now() / 1000) } });
     S.qty = 1; S.buyer = ''; S.msg = 'Sale recorded.';
     flash(`Sale recorded: ${q} × ${b.name}, ${money(q * b.price)}`);
-  } catch (e) { S.msg = e.message; flash(e.message, 'bad', 5000); }
-  await loadDay();
+  } catch (e) { S.msg = e.message; flash(e.message, 'bad', 5000); await loadDay(); }   // resync if the sale was refused
 });
 
 /* ---------- views ---------- */
 const head = right => `<header><b>PPKI SMK Tansau</b>${right || ''}</header>`;
 function render() {
   const A = $('app');
-  if (S.loading) { A.innerHTML = head() + '<main><p class="mute">Loading…</p></main>'; return; }
+  if (S.loading) {
+    A.innerHTML = head() + `<main><p class="mute">Loading…</p>${S.slow ? '<div class="card"><p>This is taking longer than usual. Check your internet connection. If you opened the link inside another app (such as WhatsApp), open it in Safari instead.</p><button class="go" onclick="location.reload()">Try again</button></div>' : ''}</main>`;
+    return;
+  }
   if (S.mode === 's') {
     A.innerHTML = studentView() + (S.zoom && S.qr ? `<div class="zoom" onclick="S.zoom=false;render()"><img src="${S.qr}" alt="Payment QR code"><p>Tap anywhere to close</p></div>` : '');
     return;
@@ -497,7 +518,7 @@ function render() {
 }
 function studentView() {
   const h = head(`<span class="mute">${esc(S.clsName)} · ${S.date}</span>` + (S.user && !S.user.isAnonymous ? `<a class="btn" href="${esc(location.pathname)}">Teacher view</a>` : ''));
-  if (S.err) return h + `<main><div class="card bad">${esc(S.err)}</div></main>`;
+  if (S.err) return h + `<main><div class="card"><p class="bad">${esc(S.err)}</p><button class="go" onclick="location.reload()">Try again</button></div></main>`;
   if (!S.day.breads.length) return h + `<main><div class="card">Your teacher has not added bread for today yet.</div></main>`;
   if (!S.me) return h + `<main><div class="card"><h2>Who are you?</h2><div class="tiles">` +
     S.studs.map(s => `<button class="tile who" onclick="me('${s.id}')">${esc(s.name)}</button>`).join('') + `</div></div></main>`;
