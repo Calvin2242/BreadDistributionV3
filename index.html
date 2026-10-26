@@ -32,6 +32,8 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 .tile small{color:var(--mute);display:block}
 .tile em{font:800 2rem/1.1 system-ui;display:block;font-style:normal}
 .who{font-size:1.4rem;font-weight:800;padding:22px 12px;min-width:46%}
+.names{flex-direction:column;flex-wrap:nowrap}
+.names .who{min-width:0;flex:none}
 .qty{display:flex;align-items:center;justify-content:space-between}
 .qty button{width:56px;height:56px;font-size:1.6rem}
 .qty b{font-size:2rem}
@@ -550,7 +552,7 @@ function studentView() {
   const h = head(`<span class="mute">${esc(S.clsName)} · ${S.date}</span>` + (S.user && !S.user.isAnonymous ? `<a class="btn" href="${esc(location.pathname)}">Teacher view</a>` : ''));
   if (S.err) return h + `<main><div class="card"><p class="bad">${esc(S.err)}</p><button class="go" onclick="location.reload()">Try again</button></div></main>`;
   if (!S.day.breads.length) return h + `<main><div class="card">Your teacher has not added bread for today yet.</div></main>`;
-  if (!S.me) return h + `<main><div class="card"><h2>Who are you?</h2><div class="tiles">` +
+  if (!S.me) return h + `<main><div class="card"><h2>Who are you?</h2><div class="tiles names">` +
     S.studs.map(s => `<button class="tile who" onclick="me('${s.id}')">${esc(s.name)}</button>`).join('') + `</div></div></main>`;
   const L = S.day.locked;
   const nav = `<nav><button class="${S.stab === 'sell' ? 'on' : ''}" onclick="S.stab='sell';render()">Sell</button>
